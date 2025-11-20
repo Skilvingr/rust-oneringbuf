@@ -1,10 +1,10 @@
 use crate::{common_def, get_buf};
-use mutringbuf::iterators::ProdIter;
-use mutringbuf::{MRBIterator, MutRB};
+use oneringbuf::iterators::ProdIter;
+use oneringbuf::{IntoRef, ORBIterator, OneRB};
 
 common_def!();
 
-fn fill_buf<B: MutRB<Item = usize>>(prod: &mut ProdIter<B>, count: usize) {
+fn fill_buf<B: OneRB<Item = usize> + IntoRef>(prod: &mut ProdIter<B>, count: usize) {
     for i in 0..count {
         let _ = prod.push(i);
     }
@@ -12,7 +12,7 @@ fn fill_buf<B: MutRB<Item = usize>>(prod: &mut ProdIter<B>, count: usize) {
 
 #[test]
 fn test_pop_exact() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     assert!(cons.pop().is_none());
@@ -45,7 +45,7 @@ fn test_pop_exact() {
 
 #[test]
 fn test_pop_ref_exact() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     fill_buf(&mut prod, BUFFER_SIZE - 1);
@@ -58,9 +58,10 @@ fn test_pop_ref_exact() {
     assert!(cons.pop().is_none());
 }
 
+#[cfg(not(all(feature = "vmem", unix)))]
 #[test]
 fn test_pop_slice_exact() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     fill_buf(&mut prod, BUFFER_SIZE - 1);
@@ -76,9 +77,10 @@ fn test_pop_slice_exact() {
     assert!(cons.pop().is_none());
 }
 
+#[cfg(not(all(feature = "vmem", unix)))]
 #[test]
 fn test_pop_avail_nw_exact() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     fill_buf(&mut prod, BUFFER_SIZE - 1);
@@ -94,9 +96,10 @@ fn test_pop_avail_nw_exact() {
     assert!(cons.pop().is_none());
 }
 
+#[cfg(not(all(feature = "vmem", unix)))]
 #[test]
 fn test_pop_slice_seam() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     fill_buf(&mut prod, BUFFER_SIZE / 2);
@@ -122,7 +125,7 @@ fn test_pop_slice_seam() {
 
 #[test]
 fn test_pop_slice_copy() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     fill_buf(&mut prod, BUFFER_SIZE / 2);

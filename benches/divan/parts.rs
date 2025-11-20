@@ -1,5 +1,5 @@
 use divan::black_box;
-use mutringbuf::{ConcurrentHeapRB, HeapSplit, MRBIterator};
+use oneringbuf::{ORBIterator, SharedHeapRB};
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -9,7 +9,7 @@ fn main() {
 
 #[divan::bench(sample_size = 100000)]
 fn advance(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[1; BUFFER_SIZE / 2]);
@@ -26,7 +26,7 @@ fn advance(b: divan::Bencher) {
 
 #[divan::bench(sample_size = 100000)]
 fn available(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[0; BUFFER_SIZE / 4]);

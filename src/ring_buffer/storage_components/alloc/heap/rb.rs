@@ -1,22 +1,19 @@
-use crate::HeapStorage;
+#[cfg(any(feature = "async", doc))]
+use crate::AsyncHeapRB;
+use crate::LocalHeapRB;
+use crate::SharedHeapRB;
 #[allow(unused_imports)]
 use crate::iterators::ProdIter;
 #[cfg(any(feature = "async", doc))]
-use crate::ring_buffer::variants::async_rb::AsyncMutRingBuf;
-use crate::{ConcurrentMutRingBuf, LocalMutRingBuf, UnsafeSyncCell};
+use crate::ring_buffer::types::AsyncHeapRBMut;
+use crate::ring_buffer::types::LocalHeapRBMut;
+use crate::ring_buffer::types::SharedHeapRBMut;
+use crate::storage_components::HeapStorage;
+use crate::utils::UnsafeSyncCell;
+
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-
-fn get_range_max<T>(capacity: usize) -> usize {
-    #[cfg(feature = "vmem")]
-    {
-        let min_size = capacity * size_of::<T>();
-        return super::vmem_helper::get_page_size_mul(min_size) / size_of::<T>();
-    }
-    #[cfg(not(feature = "vmem"))]
-    return capacity;
-}
 
 macro_rules! impl_rb {
     ($t: tt) => {
@@ -27,7 +24,7 @@ macro_rules! impl_rb {
             /// # Behaviour with `vmem` feature
             /// When `vmem` feature is enabled, the capacity of the buffer must be a multiple of
             /// the system's page size, so must be the length of the passed `Vec`.
-            /// Please, use [`crate::vmem_helper::get_page_size_mul`] to get a suitable length.
+            /// Please, use [`crate::utils::vmem_helper::get_page_size_mul`] to get a suitable length.
             fn from(value: Vec<T>) -> Self {
                 Self::_from(HeapStorage::from(value))
             }
@@ -45,7 +42,7 @@ macro_rules! impl_rb {
             pub unsafe fn new_zeroed(capacity: usize) -> Self {
                 Self::_from(
                     HeapStorage::from(
-                        (0..get_range_max::<T>(capacity))
+                        (0..capacity)
                         .map(|_| UnsafeSyncCell::new_zeroed()).collect::<Box<[UnsafeSyncCell<T>]>>()
                     )
                 )
@@ -59,28 +56,18 @@ macro_rules! impl_rb {
             /// size (equal to or greater than it).
             pub fn default(capacity: usize) -> Self
                 where T: Default + Clone {
-                Self::from(vec![T::default(); get_range_max::<T>(capacity)])
+                Self::from(vec![T::default(); capacity])
             }
         }
     };
 }
 
-// Concurrent
-
-/// A stack-allocated asynchronous ring buffer usable in concurrent environment.
-#[cfg(any(feature = "async", doc))]
-pub type AsyncHeapRB<T> = AsyncMutRingBuf<HeapStorage<T>>;
 #[cfg(any(feature = "async", doc))]
 impl_rb!(AsyncHeapRB);
+#[cfg(any(feature = "async", doc))]
+impl_rb!(AsyncHeapRBMut);
 
-/// A heap-allocated ring buffer usable in a concurrent environment.
-pub type ConcurrentHeapRB<T> = ConcurrentMutRingBuf<HeapStorage<T>>;
-
-impl_rb!(ConcurrentHeapRB);
-
-// Local
-
-/// A heap-allocated ring buffer usable in a local environment.
-pub type LocalHeapRB<T> = LocalMutRingBuf<HeapStorage<T>>;
-
+impl_rb!(SharedHeapRB);
+impl_rb!(SharedHeapRBMut);
 impl_rb!(LocalHeapRB);
+impl_rb!(LocalHeapRBMut);

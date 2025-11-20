@@ -3,13 +3,13 @@
 #[test]
 fn test_uninit() {
     use crate::common_def;
-    use mutringbuf::{ConcurrentHeapRB, HeapSplit, MRBIterator};
+    use oneringbuf::{ORBIterator, SharedHeapRB};
     use std::rc::Rc;
 
-    common_def!(buf);
+    common_def!();
 
     // Indices from 0 to RB_SIZE+1 are uninitialised
-    let buf = unsafe { ConcurrentHeapRB::new_zeroed(BUFFER_SIZE) };
+    let buf = unsafe { SharedHeapRB::new_zeroed(BUFFER_SIZE) };
     let (mut prod, mut cons) = buf.split();
 
     let slice = (0..BUFFER_SIZE - 1)

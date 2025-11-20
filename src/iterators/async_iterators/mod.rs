@@ -1,15 +1,13 @@
-#![cfg_attr(doc, doc(cfg(feature = "async")))]
 #![cfg(any(feature = "async", doc))]
 
 //! Async iterators.
 
-use crate::MRBIterator;
-use crate::Storage;
+use crate::ORBIterator;
+use crate::OneRB;
+use crate::StorageComponent;
 use crate::iterators::async_iterators::detached::AsyncDetached;
 use crate::iterators::util_macros::delegate;
 use crate::iterators::util_macros::muncher;
-use crate::ring_buffer::variants::async_rb::AsyncMutRingBuf;
-use crate::ring_buffer::wrappers::buf_ref::BufRef;
 use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
@@ -22,8 +20,7 @@ pub(crate) mod work_iter;
 
 /// Trait implemented by async iterators.
 pub trait AsyncIterator<'buf> {
-    type I: MRBIterator;
-    type S: Storage;
+    type I: ORBIterator;
 
     fn register_waker(&self, waker: &Waker);
     fn take_waker(&self) -> Option<Waker>;
@@ -34,27 +31,74 @@ pub trait AsyncIterator<'buf> {
 
     fn into_sync(self) -> Self::I;
 
-    fn from_sync(iter: Self::I, waker: BufRef<'buf, AsyncMutRingBuf<Self::S>>) -> Self;
+    fn from_sync(iter: Self::I) -> Self;
 
-    fn detach(self) -> AsyncDetached<'buf, Self, AsyncMutRingBuf<Self::S>>
+    fn detach(self) -> AsyncDetached<'buf, Self>
     where
         Self: Sized,
     {
         AsyncDetached::from_iter(self)
     }
 
-    delegate!(MRBIterator, fn prod_index(&self) -> usize);
-    delegate!(MRBIterator, fn work_index(&self) -> usize);
-    delegate!(MRBIterator, fn cons_index(&self) -> usize);
-    delegate!(MRBIterator, fn alive_iters(&self) -> u8);
-    delegate!(MRBIterator, fn index(&self) -> usize);
-    delegate!(MRBIterator, fn available(&(mut) self) -> usize);
+    unsafe fn advance(&mut self, count: usize);
+
+    fn get_mut<'b>(
+        &'b mut self,
+    ) -> ORBFuture<'buf, 'b, Self, (), &'b mut <Self::I as ORBIterator>::Item, true>;
+
+    fn get_mut_slice_exact<'b>(
+        &'b mut self,
+        count: usize,
+    ) -> ORBFuture<
+        'buf,
+        'b,
+        Self,
+        usize,
+        <<<Self::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<
+            'b,
+        >,
+        true,
+    >;
+
+    fn get_mut_slice_avail<'b>(
+        &'b mut self,
+    ) -> ORBFuture<
+        'buf,
+        'b,
+        Self,
+        (),
+        <<<Self::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<
+            'b,
+        >,
+        true,
+    >;
+
+    fn get_mut_slice_multiple_of<'b>(
+        &'b mut self,
+        count: usize,
+    ) -> ORBFuture<
+        'buf,
+        'b,
+        Self,
+        usize,
+        <<<Self::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<
+            'b,
+        >,
+        true,
+    >;
+
+    delegate!(ORBIterator, fn prod_index(&self) -> usize);
+    delegate!(ORBIterator, fn work_index(&self) -> usize);
+    delegate!(ORBIterator, fn cons_index(&self) -> usize);
+    delegate!(ORBIterator, fn alive_iters(&self) -> u8);
+    delegate!(ORBIterator, fn index(&self) -> usize);
+    delegate!(ORBIterator, fn available(&(mut) self) -> usize);
 }
 
 /// Future returned by methods in async iterators.
-pub struct MRBFuture<'buf, 'a, I, P, O, const R: bool>
+pub struct ORBFuture<'buf, 'a, I, P, O, const R: bool>
 where
-    I: AsyncIterator<'buf>,
+    I: AsyncIterator<'buf> + ?Sized,
 {
     iter: &'a mut I,
     p: Option<P>,
@@ -64,12 +108,12 @@ where
 }
 
 impl<'buf, 'a, I: AsyncIterator<'buf>, P, O, const R: bool> Unpin
-    for MRBFuture<'buf, 'a, I, P, O, R>
+    for ORBFuture<'buf, 'a, I, P, O, R>
 {
 }
 
 impl<'buf, 'a, I: AsyncIterator<'buf>, P, O, const R: bool> Future
-    for MRBFuture<'buf, 'a, I, P, O, R>
+    for ORBFuture<'buf, 'a, I, P, O, R>
 {
     type Output = Option<O>;
 
@@ -104,17 +148,19 @@ impl<'buf, 'a, I: AsyncIterator<'buf>, P, O, const R: bool> Future
 
 pub(crate) mod async_macros {
     macro_rules! gen_common_futs_fn {
-        ($LT: lifetime) => {
-            /// Async version of [`MRBIterator::get_workable`].
-            pub fn get_workable<'b>(&'b mut self) -> MRBFuture<$LT, 'b, Self, (), &'b mut T, true> {
-                fn f<'buf, 'b, II: MRBIterator<Item = T>, I: AsyncIterator<'buf, I = II>, T>(
+        () => {
+            /// Async version of [`ORBIterator::get_mut`].
+            fn get_mut<'b>(
+                &'b mut self,
+            ) -> ORBFuture<'buf, 'b, Self, (), &'b mut B::Item, true> {
+                fn f<'buf, 'b, I: AsyncIterator<'buf, I: ORBIterator<Item = T>>, T>(
                     s: &mut I,
                     _: &mut (),
                 ) -> Option<&'b mut T> {
-                    s.inner_mut().get_workable()
+                    s.inner_mut().get_mut()
                 }
 
-                MRBFuture {
+                ORBFuture {
                     iter: self,
                     p: Some(()),
                     f_r: Some(f),
@@ -123,19 +169,30 @@ pub(crate) mod async_macros {
                 }
             }
 
-            /// Async version of [`MRBIterator::get_workable_slice_exact`].
-            pub fn get_workable_slice_exact<'b>(
+            /// Async version of [`ORBIterator::get_mut_slice_exact`].
+            fn get_mut_slice_exact<'b>(
                 &'b mut self,
                 count: usize,
-            ) -> MRBFuture<$LT, 'b, Self, usize, MutableSlice<'b, T>, true> {
-                fn f<'buf, 'b, II: MRBIterator<Item = T>, I: AsyncIterator<'buf, I = II>, T>(
+            ) -> ORBFuture<
+                'buf,
+                'b,
+                Self,
+                usize,
+                <B::Storage as StorageComponent>::SliceOutputMut<'b>,
+                true,
+            > {
+                fn f<'buf, 'b, I: AsyncIterator<'buf, I: ORBIterator<Item = T>>, T>(
                     s: &mut I,
                     count: &mut usize,
-                ) -> Option<MutableSlice<'b, T>> {
-                    s.inner_mut().get_workable_slice_exact(*count)
+                ) -> Option<
+                    <<<I::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<
+                        'b,
+                    >,
+                > {
+                    s.inner_mut().get_mut_slice_exact(*count)
                 }
 
-                MRBFuture {
+                ORBFuture {
                     iter: self,
                     p: Some(count),
                     f_r: Some(f),
@@ -144,18 +201,29 @@ pub(crate) mod async_macros {
                 }
             }
 
-            /// Async version of [`MRBIterator::get_workable_slice_avail`].
-            pub fn get_workable_slice_avail<'b>(
+            /// Async version of [`ORBIterator::get_mut_slice_avail`].
+            fn get_mut_slice_avail<'b>(
                 &'b mut self,
-            ) -> MRBFuture<$LT, 'b, Self, (), MutableSlice<'b, T>, true> {
-                fn f<'buf, 'b, II: MRBIterator<Item = T>, I: AsyncIterator<'buf, I = II>, T>(
+            ) -> ORBFuture<
+                'buf,
+                'b,
+                Self,
+                (),
+                <B::Storage as StorageComponent>::SliceOutputMut<'b>,
+                true,
+            > {
+                fn f<'buf, 'b, I: AsyncIterator<'buf, I: ORBIterator<Item = T>>, T>(
                     s: &mut I,
                     _: &mut (),
-                ) -> Option<MutableSlice<'b, T>> {
-                    s.inner_mut().get_workable_slice_avail()
+                ) -> Option<
+                    <<<I::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<
+                        'b,
+                    >,
+                > {
+                    s.inner_mut().get_mut_slice_avail()
                 }
 
-                MRBFuture {
+                ORBFuture {
                     iter: self,
                     p: Some(()),
                     f_r: Some(f),
@@ -164,19 +232,30 @@ pub(crate) mod async_macros {
                 }
             }
 
-            /// Async version of [`MRBIterator::get_workable_slice_multiple_of`].
-            pub fn get_workable_slice_multiple_of<'b>(
+            /// Async version of [`ORBIterator::get_mut_slice_multiple_of`].
+            fn get_mut_slice_multiple_of<'b>(
                 &'b mut self,
                 count: usize,
-            ) -> MRBFuture<$LT, 'b, Self, usize, MutableSlice<'b, T>, true> {
-                fn f<'buf, 'b, II: MRBIterator<Item = T>, I: AsyncIterator<'buf, I = II>, T>(
+            ) -> ORBFuture<
+                'buf,
+                'b,
+                Self,
+                usize,
+                <B::Storage as StorageComponent>::SliceOutputMut<'b>,
+                true,
+            > {
+                fn f<'buf, 'b, I: AsyncIterator<'buf, I: ORBIterator<Item = T>>, T>(
                     s: &mut I,
                     count: &mut usize,
-                ) -> Option<MutableSlice<'b, T>> {
-                    s.inner_mut().get_workable_slice_multiple_of(*count)
+                ) -> Option<
+                    <<<I::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<
+                        'b,
+                    >,
+                > {
+                    s.inner_mut().get_mut_slice_multiple_of(*count)
                 }
 
-                MRBFuture {
+                ORBFuture {
                     iter: self,
                     p: Some(count),
                     f_r: Some(f),
@@ -185,7 +264,7 @@ pub(crate) mod async_macros {
                 }
             }
 
-            pub unsafe fn advance(&mut self, count: usize) {
+            unsafe fn advance(&mut self, count: usize) {
                 unsafe {
                     self.inner.advance(count);
                 }

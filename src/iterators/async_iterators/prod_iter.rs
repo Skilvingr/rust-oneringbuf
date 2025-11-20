@@ -1,42 +1,37 @@
 use core::marker::PhantomData;
 use core::task::Waker;
 
-use crate::Storage;
 use crate::iterators::ProdIter;
 use crate::iterators::async_iterators::async_macros::gen_common_futs_fn;
-use crate::iterators::async_iterators::{AsyncIterator, MRBFuture};
-use crate::iterators::iterator_trait::MRBIterator;
-use crate::iterators::iterator_trait::MutableSlice;
-use crate::ring_buffer::variants::async_rb::AsyncMutRingBuf;
-use crate::ring_buffer::wrappers::buf_ref::BufRef;
+use crate::iterators::async_iterators::{AsyncIterator, ORBFuture};
+use crate::iterators::iterator_trait::{ORBIterator, PrivateORBIterator};
+use crate::iters_components::async_iters::AsyncIterComp;
+use crate::ring_buffer::OneRB;
+use crate::ring_buffer::storage_components::StorageComponent;
+use crate::ring_buffer::wrappers::refs::IntoRef;
 
 #[doc = r##"
 Async version of [`ProdIter`].
 "##]
-pub struct AsyncProdIter<'buf, S: Storage, const W: bool> {
-    inner: ProdIter<'buf, AsyncMutRingBuf<S>>,
-    waker: BufRef<'buf, AsyncMutRingBuf<S>>,
+pub struct AsyncProdIter<B: IntoRef + OneRB<Iters: AsyncIterComp>> {
+    inner: ProdIter<B>,
 }
-unsafe impl<S: Storage, const W: bool> Send for AsyncProdIter<'_, S, W> {}
+unsafe impl<B: IntoRef + OneRB<Iters: AsyncIterComp>> Sync for AsyncProdIter<B> {}
+unsafe impl<B: IntoRef + OneRB<Iters: AsyncIterComp>> Send for AsyncProdIter<B> {}
 
-impl<'buf, S: Storage, const W: bool> AsyncIterator<'buf> for AsyncProdIter<'buf, S, W> {
-    type I = ProdIter<'buf, AsyncMutRingBuf<S>>;
-    type S = S;
+impl<'buf, B: IntoRef + OneRB<Iters: AsyncIterComp>> AsyncIterator<'buf> for AsyncProdIter<B> {
+    type I = ProdIter<B>;
 
     fn register_waker(&self, waker: &Waker) {
-        (*self.waker).prod_waker.register(waker);
+        self.inner.buffer().iters().register_prod_waker(waker);
     }
 
     fn take_waker(&self) -> Option<Waker> {
-        (*self.waker).prod_waker.take()
+        self.inner.buffer().iters().take_prod_waker()
     }
 
     fn wake_next(&self) {
-        if W {
-            (*self.waker).work_waker.wake()
-        } else {
-            (*self.waker).cons_waker.wake()
-        }
+        self.inner.buffer().iters().wake_middle_iter();
     }
 
     #[inline]
@@ -50,25 +45,25 @@ impl<'buf, S: Storage, const W: bool> AsyncIterator<'buf> for AsyncProdIter<'buf
     fn into_sync(self) -> Self::I {
         self.inner
     }
-    fn from_sync(iter: Self::I, waker: BufRef<'buf, AsyncMutRingBuf<S>>) -> Self {
-        Self { inner: iter, waker }
+    fn from_sync(iter: Self::I) -> Self {
+        Self { inner: iter }
     }
+
+    gen_common_futs_fn!();
 }
 
-impl<'buf, S: Storage<Item = T> + 'buf, T, const W: bool> AsyncProdIter<'buf, S, W> {
-    gen_common_futs_fn!( 'buf );
-
+impl<'buf, B: IntoRef + OneRB<Iters: AsyncIterComp>> AsyncProdIter<B> {
     /// Async version of [`ProdIter::push`].
-    pub fn push<'b>(&'b mut self, item: T) -> MRBFuture<'buf, 'b, Self, T, (), false> {
+    pub fn push<'b>(&'b mut self, item: B::Item) -> ORBFuture<'buf, 'b, Self, B::Item, (), false> {
         #[inline]
-        fn f<'buf, S: Storage<Item = T> + 'buf, T, const W: bool>(
-            s: &mut AsyncProdIter<'buf, S, W>,
-            item: T,
-        ) -> Result<(), T> {
+        fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncProdIter<B>,
+            item: B::Item,
+        ) -> Result<(), B::Item> {
             s.inner_mut().push(item)
         }
 
-        MRBFuture {
+        ORBFuture {
             iter: self,
             p: Some(item),
             f_r: None,
@@ -80,22 +75,25 @@ impl<'buf, S: Storage<Item = T> + 'buf, T, const W: bool> AsyncProdIter<'buf, S,
     /// Async version of [`ProdIter::push_slice`].
     pub fn push_slice<'b>(
         &'b mut self,
-        slice: &'b [T],
-    ) -> MRBFuture<'buf, 'b, Self, &'b [T], (), true>
+        slice: &'b [B::Item],
+    ) -> ORBFuture<'buf, 'b, Self, &'b [B::Item], (), true>
     where
-        T: Copy,
+        B::Item: Copy,
     {
         #[inline]
-        fn f<'buf, 'b, S: Storage<Item = T> + 'buf, T: Copy, const W: bool>(
-            s: &mut AsyncProdIter<'buf, S, W>,
-            slice: &mut &[T],
-        ) -> Option<()> {
+        fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncProdIter<B>,
+            slice: &mut &[B::Item],
+        ) -> Option<()>
+        where
+            B::Item: Copy,
+        {
             let ret = s.inner_mut().push_slice(slice);
             s.wake_next();
             ret
         }
 
-        MRBFuture {
+        ORBFuture {
             iter: self,
             p: Some(slice),
             f_r: Some(f),
@@ -107,20 +105,23 @@ impl<'buf, S: Storage<Item = T> + 'buf, T, const W: bool> AsyncProdIter<'buf, S,
     /// Async version of [`ProdIter::push_slice_clone`].
     pub fn push_slice_clone<'b>(
         &'b mut self,
-        slice: &'b [T],
-    ) -> MRBFuture<'buf, 'b, Self, &'b [T], (), true>
+        slice: &'b [B::Item],
+    ) -> ORBFuture<'buf, 'b, Self, &'b [B::Item], (), true>
     where
-        T: Clone,
+        B::Item: Clone,
     {
         #[inline]
-        fn f<'buf, S: Storage<Item = T> + 'buf, T: Clone, const W: bool>(
-            s: &mut AsyncProdIter<'buf, S, W>,
-            slice: &mut &[T],
-        ) -> Option<()> {
+        fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncProdIter<B>,
+            slice: &mut &[B::Item],
+        ) -> Option<()>
+        where
+            B::Item: Clone,
+        {
             s.inner_mut().push_slice_clone(slice)
         }
 
-        MRBFuture {
+        ORBFuture {
             iter: self,
             p: Some(slice),
             f_r: Some(f),
@@ -134,16 +135,16 @@ impl<'buf, S: Storage<Item = T> + 'buf, T, const W: bool> AsyncProdIter<'buf, S,
     /// Same as [`ProdIter::get_next_item_mut`].
     pub unsafe fn get_next_item_mut<'b>(
         &'b mut self,
-    ) -> MRBFuture<'buf, 'b, Self, (), &'b mut T, true> {
+    ) -> ORBFuture<'buf, 'b, Self, (), &'b mut B::Item, true> {
         #[inline]
-        fn f<'buf, 'b, S: Storage<Item = T> + 'buf, T, const W: bool>(
-            s: &mut AsyncProdIter<'buf, S, W>,
+        fn f<'b, B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncProdIter<B>,
             _: &mut (),
-        ) -> Option<&'b mut T> {
+        ) -> Option<&'b mut B::Item> {
             unsafe { s.inner_mut().get_next_item_mut() }
         }
 
-        MRBFuture {
+        ORBFuture {
             iter: self,
             p: Some(()),
             f_r: Some(f),
@@ -153,16 +154,18 @@ impl<'buf, S: Storage<Item = T> + 'buf, T, const W: bool> AsyncProdIter<'buf, S,
     }
 
     /// Async version of [`ProdIter::get_next_item_mut_init`].
-    pub fn get_next_item_mut_init<'b>(&'b mut self) -> MRBFuture<'buf, 'b, Self, (), *mut T, true> {
+    pub fn get_next_item_mut_init<'b>(
+        &'b mut self,
+    ) -> ORBFuture<'buf, 'b, Self, (), *mut B::Item, true> {
         #[inline]
-        fn f<'buf, S: Storage<Item = T> + 'buf, T, const W: bool>(
-            s: &mut AsyncProdIter<'buf, S, W>,
+        fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncProdIter<B>,
             _: &mut (),
-        ) -> Option<*mut T> {
+        ) -> Option<*mut B::Item> {
             s.inner_mut().get_next_item_mut_init()
         }
 
-        MRBFuture {
+        ORBFuture {
             iter: self,
             p: Some(()),
             f_r: Some(f),
@@ -177,16 +180,17 @@ impl<'buf, S: Storage<Item = T> + 'buf, T, const W: bool> AsyncProdIter<'buf, S,
     pub unsafe fn get_next_slices_mut<'b>(
         &'b mut self,
         count: usize,
-    ) -> MRBFuture<'buf, 'b, Self, usize, MutableSlice<'b, T>, true> {
+    ) -> ORBFuture<'buf, 'b, Self, usize, <B::Storage as StorageComponent>::SliceOutputMut<'b>, true>
+    {
         #[inline]
-        fn f<'buf, 'b, S: Storage<Item = T> + 'buf, T, const W: bool>(
-            s: &mut AsyncProdIter<'buf, S, W>,
+        fn f<'b, B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncProdIter<B>,
             count: &mut usize,
-        ) -> Option<MutableSlice<'b, T>> {
+        ) -> Option<<B::Storage as StorageComponent>::SliceOutputMut<'b>> {
             unsafe { s.inner_mut().get_next_slices_mut(*count) }
         }
 
-        MRBFuture {
+        ORBFuture {
             iter: self,
             p: Some(count),
             f_r: Some(f),

@@ -3,17 +3,17 @@ extern crate alloc;
 #[cfg(all(feature = "async", feature = "alloc"))]
 #[tokio::main]
 async fn main() {
-    use mutringbuf::AsyncHeapRB;
-    use mutringbuf::iterators::async_iterators::AsyncIterator;
+    use oneringbuf::AsyncHeapRBMut;
+    use oneringbuf::iterators::async_iterators::AsyncIterator;
 
     const BUFFER_SIZE: usize = 4095;
 
-    let buf = AsyncHeapRB::from(vec![0; BUFFER_SIZE + 1]);
-    let (mut as_prod, mut as_work, mut as_cons) = buf.split_mut();
+    let buf = AsyncHeapRBMut::from(vec![0; BUFFER_SIZE + 1]);
+    let (mut as_prod, mut as_work, mut as_cons) = buf.split_async_mut();
 
     as_prod.push(1).await;
 
-    if let Some(res) = as_work.get_workable().await {
+    if let Some(res) = as_work.get_mut().await {
         *res += 1;
         unsafe {
             as_work.advance(1);
@@ -29,8 +29,8 @@ async fn main() {
     let slice: Vec<i32> = (0..BUFFER_SIZE as i32 / 2).collect();
     as_prod.push_slice(&slice).await;
 
-    #[cfg(not(feature = "vmem"))]
-    if let Some((h, t)) = as_work.get_workable_slice_avail().await {
+    #[cfg(not(all(feature = "vmem", unix)))]
+    if let Some((h, t)) = as_work.get_mut_slice_avail().await {
         let len = h.len() + t.len();
 
         for x in h.iter_mut().chain(t) {
@@ -41,28 +41,9 @@ async fn main() {
             as_work.advance(len);
         }
     }
-    #[cfg(feature = "vmem")]
-    if let Some(r) = as_work.get_workable_slice_avail().await {
-        let len = r.len();
 
-        for x in r {
-            *x += 1;
-        }
-
-        unsafe {
-            as_work.advance(len);
-        }
-    }
-
-    #[cfg(not(feature = "vmem"))]
     if let Some((h, t)) = as_cons.peek_available().await {
         for (x, y) in h.iter().chain(t).zip(&slice) {
-            assert_eq!(*x, y + 1);
-        }
-    }
-    #[cfg(feature = "vmem")]
-    if let Some(r) = as_cons.peek_available().await {
-        for (x, y) in r.iter().zip(&slice) {
             assert_eq!(*x, y + 1);
         }
     }

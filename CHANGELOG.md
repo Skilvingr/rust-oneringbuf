@@ -1,139 +1,138 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+Dates are written in DD/MM/YYYY order.
+
 <a name="v0.6.0"></a>
-## v0.6.0 (Unreleased)
+## v0.6.0 (20/11/2025)
 
-* **Asynchronous support has been completely reworked.**
+### Breaking Changes
+* **Renamed the crate to `OneRingBuf`.**
+* Renamed `Concurrent*` buffers to `Shared*` (e.g., `ConcurrentHeapRB` is now `SharedHeapRB`).
+* Renamed `*workable*` methods to `*mut*`. For example: `get_workable_slice_exact` -> `get_mut_slice_exact`.
+* `ConsIter` and `AsyncProdIter` no longer require a `const W: bool` parameter.
+* Buffers with in-place mutability are now distinct types with a `*Mut` suffix (e.g., `SharedHeapRBMut`).
+    * The `split_mut()` method is now exclusive to these `*Mut` buffer types.
+    * The `split()` method is now exclusive to non-mutable buffer types.
+* Reworked asynchronous support:
+    * Async iterators can no longer be obtained from synchronous buffers.
+    * Introduced dedicated async buffers: `AsyncHeapRB`, `AsyncStackRB`, and `AsyncVmemRB` (and their `*Mut` counterparts).
+* Removed `*_alive` and `set_*_alive` methods. Users can track the status of the iterators by themselves, using counters, for example.
 
-Async iterators can no longer be obtained from a normal buffer (e.g., `ConcurrentHeapRB` or `ConcurrentStackRB`). Instead, two dedicated buffers have been added: `AsyncHeapRB` and `AsyncStackRB`.
+### New Features
+* Stack-allocated, heap-allocated, and vmem-optimised buffers are no longer mutually exclusive and can be used within the same project.
 
-As a result, iterators can now synchronize properly, and each will have their own futures polled only when the next one makes a move.
+### Bug Fixes
+* Fixed a bug in the `drop` implementation, identified by running sanitisers.
+* Fixed issue #2.
+* Fixed a memory leak that occurred with uninitialised buffers.
 
-* **Vmem buffers are now more flexible regarding buffer length.**
+### Other Changes
+* Vmem buffer size requirements are now more flexible. The total buffer size in bytes (`length * size_of::<T>`) must be a multiple of the page size, not necessarily the length.
+* Added sanitisers to the CI pipeline.
 
-Previously, vmem-optimized buffers could only have a length that was a multiple of the OS-reported page size. While not an error, this was a limitation. Now, the size check applies to the entire buffer. For example, if `page_size = 4096` and a buffer contains elements of type `T` where `size_of::<T>() = 4096`, such a buffer can have any length.
-
-* **Added sanitizers and fixed a bug in the drop implementation.**
-
-* **`*_alive` and `set_*_alive` methods have been removed.**
-
-These methods no longer made sense. Users should monitor the status of iterators themselves, perhaps by loading and storing an external atomic variable.
-
-* **Fixed issue #2.**
-
-* **Fixed leak for uninitialized buffers.**
 
 <a name="v0.5.4"></a>
 ## v0.5.4 (02/10/2025)
 
-* make `index` panic if index is out of bounds.
+* The `index` method now panics on out-of-bounds access.
 
 <a name="v0.5.3"></a>
 ## v0.5.3 (09/05/2025)
 
-* fix docs.
+* Fixed documentation.
 
 <a name="v0.5.2"></a>
 ## v0.5.2 (08/05/2025)
 
-* fix vmem optimisation.
-* Add additional tests.
+* Fixed virtual memory optimisation.
+* Added additional tests.
 
 <a name="v0.5.1"></a>
 ## v0.5.1 (17/04/2025)
 
-* add method `UnsafeSyncCell::take_inner`.
-* fix vmem optimisation.
+* Added `UnsafeSyncCell::take_inner` method.
+* Fixed virtual memory optimisation.
 
 <a name="v0.5.0"></a>
 ## v0.5.0 (15/04/2025)
 
-* Iterators have been moved to `mutringbuf::iterators` module.
+* Moved iterators to the `mutringbuf::iterators` module.
 * Added support for virtual memory optimisation.
 
 <a name="v0.4.2"></a>
 ## v0.4.2 (07/02/2025)
 
-* Re-export trait `ConcurrentRB`.
+* Re-exported `ConcurrentRB` trait.
 
 <a name="v0.4.1"></a>
 ## v0.4.1 (27/01/2025)
 
-* method `set_index` has been removed from common trait and will be available only for `Detached` iterators.
-* Performance optimisations.
-* Fix a memory leak.
-* Re-export `Storage` trait.
+* Removed the `set_index` method from the common trait; it is now only available for `Detached` iterators.
+* Implemented performance optimisations.
+* Fixed a memory leak.
+* Re-exported `Storage` trait.
 
 <a name="v0.4.0"></a>
 ## v0.4.0 (15/11/2024)
 
-* split methods are now part of traits: `HeapSplit` and `StackSplit`.
-* `pop()` in `ConsIter` acts now as `ptr::read`, copying bitwise the content of the cell.
-  Old `pop()` method is now called `pop_move()`.
-* Some methods that were previously available only for `WorkIter`, namely:
-  * `get_workable`
-  * `get_workable_slice_exact`
-  * `get_workable_slice_avail`
-  * `get_workable_slice_multiple_of`
-
-  can now be used by all the iterators, sync and async.
-* All kinds of iterators can now be detached, yielding a `Detached` or an `AsyncDetached`.
-* Async iterators can now be used in a no-std environment.
-* Some imports have changed.
+* Moved buffer split methods to the `HeapSplit` and `StackSplit` traits.
+* `pop()` in `ConsIter` now performs a bitwise copy (`ptr::read`) of the cell's content.
+* The previous `pop()` behaviour is now available via the `pop_move()` method.
+* Methods previously exclusive to `WorkIter` (e.g., `get_mut`, `get_mut_slice_exact`) are now available for all iterator types.
+* All iterator types can now be detached, yielding a `Detached` or `AsyncDetached` iterator.
+* Enabled async iterators in `no-std` environments.
+* Updated several import paths.
 
 <a name="v0.3.1"></a>
 ## v0.3.1 (27/06/2024)
 
-* Every iterator can now retrieve indices of other iterators.
-* Prod iterators have now a method to fetch a tuple of mutable slices; useful to directly
-  write data without the need to use copy or clone methods.
-* A convenience method to busy-wait for a certain amount of items has been added.
-* Fixed a bug that could cause indices to overlap.
+* All iterators can now retrieve the indices of other iterators.
+* Added a method to producer iterators for fetching a tuple of mutable slices, allowing direct writes.
+* Added a convenience method to busy-wait for a specific number of items.
+* Fixed a bug that could cause iterator indices to overlap.
 
 <a name="v0.3.0"></a>
 ## v0.3.0 (13/05/2024)
 
-* `ConcurrentStackRB` and `LocalStackRB` now have a new `new_zeroed()` method, which creates a new buffer
-  with zeroed (uninitialised) elements.
-* `new` methods in `ConcurrentHeapRB` and `LocalHeapRB` are now called `new_zeroed`.
-* Methods in `ProdIter` have been split into `normal` and `*_init` ones, this in order to make possible
-  to work with uninitialised memory.
-* Some UBs have been fixed.
-* Solve memory leaks when dropping a buffer.
-* Async support has been added.
+* Added a `new_zeroed()` method to `ConcurrentStackRB` and `LocalStackRB` to create buffers with uninitialised elements.
+* Renamed `new()` methods in `ConcurrentHeapRB` and `LocalHeapRB` to `new_zeroed()`.
+* Split `ProdIter` methods into standard and `*_init` variants to support working with uninitialised memory.
+* Fixed several instances of Undefined Behaviour.
+* Resolved memory leaks when dropping a buffer.
+* Added initial asynchronous support.
 
 <a name="v0.2.0"></a>
 ## v0.2.0 (06/05/2024)
 
-* Accumulator has been removed from `WorkIter`. There are better ways to achieve the same behaviour, like:
-  [this one](https://github.com/Skilvingr/rust-mutringbuf/commit/c931aecc775fe0b222db9ff0cc4bb9ab04881bd4#diff-0b0e4efcf55f384696cdccec18c30a9dee3e81722afeca2b0509e12dc44a946b).
-* Types have been simplified, so instead of e.g. `ProdIter<ConcurrentHeapRB<usize>, usize>`, one can directly write `ProdIter<ConcurrentHeapRB<usize>>`.
+* Removed the accumulator from `WorkIter`.
+* Simplified buffer types in iterator definitions (e.g., `ProdIter<ConcurrentHeapRB<usize>>` instead of `ProdIter<ConcurrentHeapRB<usize>, usize>`).
 
 <a name="v0.1.3"></a>
 ## v0.1.3 (29/03/2024)
 
-* `ProdIter` has now two methods to write data using a mutable reference or a mutable pointer:
-  - `get_next_item_mut`;
-  - `get_next_item_mut_init`.
+* Added `get_next_item_mut` and `get_next_item_mut_init` methods to `ProdIter` for writing data via mutable references.
 
 <a name="v0.1.2"></a>
 ## v0.1.2 (22/03/2024)
 
-* rename `Iterator` to `MRBIterator` to avoid annoying conflicts with other imports.
+* Renamed `Iterator` trait to `MRBIterator` to prevent conflicts with standard library imports.
 
 <a name="v0.1.1"></a>
 ## v0.1.1 (17/03/2024)
 
-* Remove alloc useless use.
-* Remove useless drop for stack-allocated buffers.
-* Add tests for stack-allocated buffers.
+* Removed unnecessary `alloc` usage.
+* Removed redundant `drop` implementation for stack-allocated buffers.
+* Added tests for stack-allocated buffers.
 
 <a name="v0.1.0"></a>
 ## v0.1.0 (17/03/2024)
 
-* Rename `new_heap(capacity)` method to `new(capacity)`.
-* Add a new `default method` for heap-allocated buffers.
+* Renamed `new_heap(capacity)` to `new(capacity)`.
+* Added a `default` method for heap-allocated buffers.
 
 <a name="v0.1.0-alpha.1"></a>
 ## v0.1.0-alpha.1 (15/03/2024)
 
-* Rename `Iterable` trait to `Iterator`.
-* Add a new trait `MutRB` to represent a generic ring buffer.
+* Renamed `Iterable` trait to `Iterator`.
+* Added a new `MutRB` trait to represent a generic ring buffer.

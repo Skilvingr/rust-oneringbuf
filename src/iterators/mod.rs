@@ -15,9 +15,7 @@ pub use sync_iterators::{
 };
 
 use core::ptr;
-pub use iterator_trait::MRBIterator;
-pub use iterator_trait::MutableSlice;
-pub use iterator_trait::NonMutableSlice;
+pub use iterator_trait::ORBIterator;
 
 pub(crate) use iterator_trait::iter_macros::*;
 
@@ -40,40 +38,40 @@ pub(crate) mod util_macros {
     }
 
     macro_rules! delegate {
-        ($Inner: tt $(($inline: tt))?, $v: vis fn $fn_name: ident (&self$(, $arg: ident $(: $arg_t: ty)?)*)
+        ($Inner: tt $(($inline: tt))?, $v: vis fn $fn_name: ident $(<$lt: lifetime>)? (&$($lt_self: lifetime)? self$(, $arg: ident $(: $arg_t: ty)?)*)
         $(-> $($ret_g: tt)*)?) => {
             #[doc = concat!("Same as [`", stringify!($Inner), "::", stringify!($fn_name), "`].")]
             $(#[$inline])?
-            $v fn $fn_name(&self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
+            $v fn $fn_name $(<$lt>)? (& $($lt_self)? self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
                 self.inner().$fn_name($($arg)*)
             }
         };
-        ($Inner: tt $(($inline: tt))?, $v: vis unsafe fn $fn_name: ident (&self$(, $arg: ident $(: $arg_t: ty)?)*)
+        ($Inner: tt $(($inline: tt))?, $v: vis unsafe fn $fn_name: ident $(<$lt: lifetime>)? (&$($lt_self: lifetime)? self$(, $arg: ident $(: $arg_t: ty)?)*)
         $(-> $($ret_g: tt)*)?) => {
             #[doc = concat!("Same as [`", stringify!($Inner), "::", stringify!($fn_name), "`].")]
             /// # Safety
             #[doc = concat!("Same as [`", stringify!($Inner), "::", stringify!($fn_name), "`].")]
             $(#[$inline])?
-            $v unsafe fn $fn_name(&self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
+            $v unsafe fn $fn_name $(<$lt>)? (& $($lt_self)? self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
                 self.inner().$fn_name($($arg)*)
             }
         };
 
-        ($Inner: tt $(($inline: tt))?, $v: vis fn $fn_name: ident (&$(($m: tt))? self $(, $arg: ident $(: $arg_t: ty)?)*)
+        ($Inner: tt $(($inline: tt))?, $v: vis fn $fn_name: ident $(<$lt: lifetime>)? (&$($lt_self: lifetime)? $(($m: tt))? self $(, $arg: ident $(: $arg_t: ty)?)*)
         $(-> $($ret_g: tt)*)?) => {
             #[doc = concat!("Same as [`", stringify!($Inner), "::", stringify!($fn_name), "`].")]
             $(#[$inline])?
-            $v fn $fn_name(&$($m)? self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
+            $v fn $fn_name $(<$lt>)? (& $($lt_self)? $($m)? self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
                 self.inner_mut().$fn_name($($arg)*)
             }
         };
-        ($Inner: tt $(($inline: tt))?, $v: vis unsafe fn $fn_name: ident (&$(($m: tt))? self $(, $arg: ident $(: $arg_t: ty)?)*)
+        ($Inner: tt $(($inline: tt))?, $v: vis unsafe fn $fn_name: ident $(<$lt: lifetime>)? (&$($lt_self: lifetime)? $(($m: tt))? self $(, $arg: ident $(: $arg_t: ty)?)*)
         $(-> $($ret_g: tt)*)?) => {
             #[doc = concat!("Same as [`", stringify!($Inner), "::", stringify!($fn_name), "`].")]
             /// # Safety
             #[doc = concat!("Same as [`", stringify!($Inner), "::", stringify!($fn_name), "`].")]
             $(#[$inline])?
-            $v unsafe fn $fn_name(&$($m)? self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
+            $v unsafe fn $fn_name $(<$lt>)? (& $($lt_self)? $($m)? self$(, $arg $(: $arg_t)?)*) $(-> muncher!{ $($ret_g)* })? {
                 unsafe { self.inner_mut().$fn_name($($arg)*) }
             }
         };

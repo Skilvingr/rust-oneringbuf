@@ -1,5 +1,5 @@
 use divan::black_box;
-use mutringbuf::{ConcurrentHeapRB, HeapSplit};
+use oneringbuf::SharedHeapRB;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -9,7 +9,7 @@ fn main() {
 
 #[divan::bench(sample_size = 100000)]
 fn slice_x10(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[1; BUFFER_SIZE / 2]);
@@ -24,7 +24,7 @@ fn slice_x10(b: divan::Bencher) {
 
 #[divan::bench(sample_size = 100000)]
 fn slice_x100(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[1; BUFFER_SIZE / 2]);
@@ -39,7 +39,7 @@ fn slice_x100(b: divan::Bencher) {
 
 #[divan::bench(sample_size = 100000)]
 fn slice_x1000_local(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[1; BUFFER_SIZE / 2]);
@@ -54,7 +54,7 @@ fn slice_x1000_local(b: divan::Bencher) {
 
 #[divan::bench(sample_size = 100000)]
 fn slice_x1000(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[1; BUFFER_SIZE / 2]);
@@ -69,7 +69,7 @@ fn slice_x1000(b: divan::Bencher) {
 
 #[divan::bench(sample_size = 100000)]
 fn slice_x1000_clone(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice_clone(&[1; BUFFER_SIZE / 2]);
@@ -84,7 +84,7 @@ fn slice_x1000_clone(b: divan::Bencher) {
 
 #[divan::bench(sample_size = 100000)]
 fn slice_xbuf_size(b: divan::Bencher) {
-    let buf = ConcurrentHeapRB::default(BUFFER_SIZE);
+    let buf = SharedHeapRB::default(BUFFER_SIZE);
     let (mut prod, mut cons) = buf.split();
 
     prod.push_slice(&[1; BUFFER_SIZE / 2]);

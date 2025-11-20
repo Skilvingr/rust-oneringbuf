@@ -1,7 +1,15 @@
 #!/bin/bash
 
+run() {
+    $1 --no-default-features &&
+    $1 --no-default-features --features async &&
+
+    $1 &&
+    $1 --features async
+}
+
 ./miri_test &&
 ./sanitisers &&
 cargo +nightly test --features vmem --features async --test tests &&
-cargo bench --no-run &&
+run "cargo bench --no-run" &&
 RUSTFLAGS="--cfg cpal" cargo build --example cpal

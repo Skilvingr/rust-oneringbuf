@@ -1,27 +1,23 @@
 extern crate alloc;
 
 use crate::{common_def, get_buf};
-use mutringbuf::iterators::Detached;
-use mutringbuf::iterators::{ConsIter, ProdIter, WorkIter};
-use mutringbuf::{MRBIterator, MutRB};
+use oneringbuf::iterators::Detached;
+use oneringbuf::iterators::{ConsIter, ProdIter, WorkIter};
+use oneringbuf::{IntoRef, ORBIterator, OneRB};
 
 common_def!();
 
-fn fill_buf(prod: &mut ProdIter<impl MutRB<Item = usize>>) {
+fn fill_buf(prod: &mut ProdIter<impl IntoRef + OneRB<Item = usize>>) {
     let slice = (0..BUFFER_SIZE - 1).collect::<Vec<usize>>();
     prod.push_slice(&slice);
 }
 
 #[allow(clippy::type_complexity)]
-fn prepare<'buf>(
-    mut prod: ProdIter<'buf, impl MutRB<Item = usize>>,
-    mut work: WorkIter<'buf, impl MutRB<Item = usize>>,
-    mut cons: ConsIter<'buf, impl MutRB<Item = usize>, true>,
-) -> (
-    ProdIter<'buf, impl MutRB<Item = usize>>,
-    Detached<WorkIter<'buf, impl MutRB<Item = usize>>>,
-    ConsIter<'buf, impl MutRB<Item = usize>, true>,
-) {
+fn prepare<B: IntoRef + OneRB<Item = usize>>(
+    mut prod: ProdIter<B>,
+    mut work: WorkIter<B>,
+    mut cons: ConsIter<B>,
+) -> (ProdIter<B>, Detached<WorkIter<B>>, ConsIter<B>) {
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
     assert_eq!(work.available(), 0);
     assert_eq!(cons.available(), 0);
@@ -35,7 +31,7 @@ fn prepare<'buf>(
     let mut work = work.detach();
 
     for _ in 0..BUFFER_SIZE - 1 {
-        if let Some(data) = work.get_workable() {
+        if let Some(data) = work.get_mut() {
             *data += 1;
             unsafe { work.advance(1) };
         }
@@ -49,7 +45,7 @@ fn prepare<'buf>(
 
 #[test]
 fn test_work_detached_sync_index() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(SharedMut);
     let (prod, work, cons) = buf.split_mut();
 
     let (mut prod, mut work, mut cons) = prepare(prod, work, cons);
@@ -71,7 +67,7 @@ fn test_work_detached_sync_index() {
 
 #[test]
 fn test_work_detached() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(SharedMut);
     let (prod, work, cons) = buf.split_mut();
 
     let (mut prod, work, mut cons) = prepare(prod, work, cons);
@@ -93,7 +89,7 @@ fn test_work_detached() {
 
 #[test]
 fn test_work_detached_set_index() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(SharedMut);
     let (prod, work, cons) = buf.split_mut();
 
     let (mut prod, mut work, mut cons) = prepare(prod, work, cons);
@@ -123,7 +119,7 @@ fn test_work_detached_set_index() {
 
 #[test]
 fn test_work_go_back() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(SharedMut);
     let (_, work, _) = buf.split_mut();
 
     let mut work = work.detach();

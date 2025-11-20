@@ -2,14 +2,13 @@
 fn main() {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use cpal::{InputCallbackInfo, OutputCallbackInfo, StreamConfig};
-    use mutringbuf::HeapSplit;
-    use mutringbuf::{ConcurrentHeapRB, MRBIterator};
+    use oneringbuf::ORBIterator;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::Relaxed;
     use std::thread;
 
-    const BUF_SIZE: usize = 4096 * 500;
+    const BUF_SIZE: usize = 4096 * 50;
     const DELAY_MS: usize = 500;
     const DECAY: f32 = 0.5;
 
@@ -25,7 +24,11 @@ fn main() {
 
     let delay_samples = DELAY_MS * (in_cfg.sample_rate.0 as usize / 1000);
 
-    let buf = ConcurrentHeapRB::from(vec![0.; BUF_SIZE]);
+    #[cfg(feature = "alloc")]
+    let buf = oneringbuf::SharedHeapRBMut::from(vec![0.; BUF_SIZE]);
+    #[cfg(not(feature = "alloc"))]
+    let mut buf = oneringbuf::SharedStackRBMut::<f32, BUF_SIZE>::default();
+
     let (mut prod, mut work, mut cons) = buf.split_mut();
 
     let stop_worker = Arc::new(AtomicBool::new(false));
@@ -34,25 +37,12 @@ fn main() {
         let mut acc = vec![0f32; delay_samples];
 
         while !stop_clone.load(Relaxed) {
-            #[cfg(not(feature = "vmem"))]
-            if let Some((h, t)) = work.get_workable_slice_exact(delay_samples) {
+            if let Some((h, t)) = work.get_mut_slice_exact(delay_samples) {
                 let len = h.len() + t.len();
                 h.swap_with_slice(&mut acc[..h.len()]);
                 t.swap_with_slice(&mut acc[h.len()..]);
 
                 for (v, w) in h.iter_mut().chain(t).zip(&acc) {
-                    *v *= DECAY;
-                    *v += *w;
-                }
-
-                unsafe { work.advance(len) };
-            }
-            #[cfg(feature = "vmem")]
-            if let Some(r) = work.get_workable_slice_exact(delay_samples) {
-                let len = r.len();
-                r.swap_with_slice(&mut acc);
-
-                for (v, w) in r.iter_mut().zip(&acc) {
                     *v *= DECAY;
                     *v += *w;
                 }
@@ -84,21 +74,11 @@ fn main() {
             move |slice: &mut [f32], _info: &OutputCallbackInfo| {
                 let len = slice.len();
 
-                #[cfg(not(feature = "vmem"))]
                 if let Some((h, t)) = cons.peek_slice(len) {
                     slice[..h.len()].copy_from_slice(h);
                     slice[h.len()..].copy_from_slice(t);
 
                     unsafe { cons.advance(len) };
-                }
-                #[cfg(feature = "vmem")]
-                if let Some(r) = cons.peek_slice(len) {
-                    slice.copy_from_slice(r);
-
-                    unsafe { cons.advance(len) };
-                } else {
-                    // Good!
-                    println!("Output iter fell behind!");
                 }
             },
             move |err| println!("OUTPUT ERROR: {}", err),
@@ -127,5 +107,5 @@ fn main() {
 #[cfg(not(cpal))]
 pub fn main() {
     eprintln!("To run this example, please, use the following command:");
-    println!("RUSTFLAGS=\"--cfg cpal\" cargo run --example cpal");
+    println!(r#"RUSTFLAGS="--cfg cpal" cargo run --example cpal"#);
 }

@@ -1,11 +1,19 @@
 #[cfg(doc)]
 use {crate::iterators::ConsIter, crate::iterators::Detached, core::mem::MaybeUninit};
 
-use crate::iterators::iterator_trait::{MRBIterator, MutableSlice, PrivateMRBIterator};
+use crate::iterators::iterator_trait::{ORBIterator, PrivateORBIterator};
+use crate::iterators::sync_iterators::Iter;
 use crate::iterators::{copy_from_slice_unchecked, private_impl};
-use crate::ring_buffer::variants::ring_buffer_trait::{ConcurrentRB, IterManager, MutRB};
-use crate::ring_buffer::wrappers::buf_ref::BufRef;
+use crate::ring_buffer::iters_components::PIterComponent;
+use crate::ring_buffer::storage_components::{PStorageComponent, StorageComponent};
+use crate::ring_buffer::wrappers::refs::IntoRef;
 use crate::ring_buffer::wrappers::unsafe_sync_cell::UnsafeSyncCell;
+use crate::ring_buffer::{OneRB, SharedRB};
+#[cfg(feature = "async")]
+use crate::{
+    iterators::{AsyncProdIter, async_iterators::AsyncIterator},
+    iters_components::async_iters::AsyncIterComp,
+};
 
 #[doc = r##"
 Iterator used to push data into the buffer.
@@ -50,62 +58,66 @@ initialised memory.
 On the other hand, `*_init methods` always perform a check over the memory they are going to write and choose the proper way to
 deal it, even dropping the old value, if there is the need. So they are safe to use upon a possibly uninitialised block.
 "##]
-pub struct ProdIter<'buf, B: MutRB> {
-    index: usize,
-    cached_avail: usize,
-    buffer: BufRef<'buf, B>,
+#[repr(transparent)]
+pub struct ProdIter<B: IntoRef + OneRB> {
+    inner: Iter<B>,
 }
 
-unsafe impl<B: ConcurrentRB + MutRB<Item = T>, T> Send for ProdIter<'_, B> {}
+unsafe impl<B: IntoRef + OneRB + SharedRB> Send for ProdIter<B> {}
 
-impl<B: MutRB + IterManager> Drop for ProdIter<'_, B> {
-    fn drop(&mut self) {
-        self.buffer.drop_iter();
-    }
-}
+impl<B: IntoRef + OneRB<Item = T>, T> PrivateORBIterator for ProdIter<B> {
+    type _Buffer = B;
 
-impl<B: MutRB<Item = T>, T> PrivateMRBIterator<T> for ProdIter<'_, B> {
     #[inline]
     fn _available(&mut self) -> usize {
         let succ_idx = self.succ_index();
 
         unsafe {
-            self.cached_avail = match self.index < succ_idx {
-                true => succ_idx.unchecked_sub(self.index).unchecked_sub(1),
+            self.inner.cached_avail = match self.inner.index < succ_idx {
+                true => succ_idx.unchecked_sub(self.inner.index).unchecked_sub(1),
                 false => self
-                    .buf_len()
-                    .unchecked_sub(self.index)
+                    .inner
+                    .buffer
+                    .storage()
+                    .len()
+                    .unchecked_sub(self.inner.index)
                     .unchecked_add(succ_idx)
                     .unchecked_sub(1),
             };
         }
 
-        self.cached_avail
+        self.inner.cached_avail
     }
 
     #[inline]
     fn set_atomic_index(&self, index: usize) {
-        self.buffer.set_prod_index(index);
+        self.inner.buffer.iters().set_prod_index(index);
     }
 
     #[inline]
     fn succ_index(&self) -> usize {
-        self.buffer.cons_index()
+        self.inner.buffer.iters().cons_index()
     }
 
     private_impl!();
 }
 
-impl<B: MutRB<Item = T>, T> MRBIterator for ProdIter<'_, B> {
+impl<B: IntoRef + OneRB<Item = T>, T> ORBIterator for ProdIter<B> {
     type Item = T;
+    type Buffer = B;
 }
 
-impl<'buf, B: MutRB<Item = T>, T> ProdIter<'buf, B> {
-    pub(crate) fn new(value: BufRef<'buf, B>) -> Self {
+#[cfg(feature = "async")]
+impl<B: IntoRef + OneRB<Iters: AsyncIterComp>> ProdIter<B> {
+    pub fn into_async(self) -> AsyncProdIter<B> {
+        AsyncIterator::from_sync(self)
+    }
+}
+
+impl<B: IntoRef + OneRB<Item = T>, T> ProdIter<B> {
+    pub(crate) fn new(value: B::TargetRef) -> Self {
         Self {
-            index: 0,
-            buffer: value,
-            cached_avail: 0,
+            inner: Iter::new(value),
         }
     }
 
@@ -161,42 +173,17 @@ impl<'buf, B: MutRB<Item = T>, T> ProdIter<'buf, B> {
         self._push(value, f)
     }
 
-    #[cfg(feature = "vmem")]
     #[inline]
     fn _push_slice(&mut self, slice: &[T], f: fn(&mut [T], &[T])) -> Option<()> {
         let count = slice.len();
 
-        if let Some(binding) = self.next_chunk_mut(count) {
-            f(binding, slice);
-
+        self.check(count).then(|| {
+            self.inner
+                .buffer
+                .storage_mut()
+                ._push_slice(self.inner.index, slice, f);
             unsafe { self.advance(count) };
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    #[cfg(not(feature = "vmem"))]
-    #[inline]
-    fn _push_slice(&mut self, slice: &[T], f: fn(&mut [T], &[T])) -> Option<()> {
-        let count = slice.len();
-
-        if let Some((binding_h, binding_t)) = self.next_chunk_mut(count) {
-            let mid = binding_h.len();
-            if mid == slice.len() {
-                f(binding_h, slice);
-            } else {
-                unsafe {
-                    f(binding_h, slice.get_unchecked(..mid));
-                    f(binding_t, slice.get_unchecked(mid..));
-                }
-            }
-
-            unsafe { self.advance(count) };
-            Some(())
-        } else {
-            None
-        }
+        })
     }
 
     /// Tries to push a slice of items by copying the elements.
@@ -303,7 +290,7 @@ impl<'buf, B: MutRB<Item = T>, T> ProdIter<'buf, B> {
     /// This reference can be used to write data into an *initialised* item.
     ///
     /// Items can be initialised by calling [`Self::get_next_item_mut_init`] or by creating a buffer
-    /// using `default` constructor. E.g.: `ConcurrentHeapRB::default` or `LocalStackRB::default`.
+    /// using `default` constructor. E.g.: `SharedHeapRB::default` or `LocalStackRB::default`.
     ///
     /// For uninitialised items, use [`Self::get_next_item_mut_init`], instead.
     ///
@@ -322,7 +309,7 @@ impl<'buf, B: MutRB<Item = T>, T> ProdIter<'buf, B> {
     /// If available, returns a mutable pointer to the next item.
     /// This pointer can be used to write data into the item, even if this is not already initialised.
     /// It is important to note that reading from this pointer or turning it into a reference is still
-    /// undefined behavior, unless the item is initialized.
+    /// undefined behavior, unless the item is initialised.
     ///
     /// If the memory pointed by this pointer is already initialised, it is possible to write into it
     /// with a simple:
@@ -354,7 +341,7 @@ impl<'buf, B: MutRB<Item = T>, T> ProdIter<'buf, B> {
     /// These references can be used to write data into *initialised* items.
     ///
     /// Items can be initialised (one by one) by calling [`Self::get_next_item_mut_init`] or by creating a buffer
-    /// using `default` constructor. E.g.: `ConcurrentHeapRB::default` or `LocalStackRB::default`.
+    /// using `default` constructor. E.g.: `SharedHeapRB::default` or `LocalStackRB::default`.
     ///
     /// <div class="warning">
     ///
@@ -364,8 +351,17 @@ impl<'buf, B: MutRB<Item = T>, T> ProdIter<'buf, B> {
     ///
     /// # Safety
     /// The retrieved items must be initialised! For more info, refer to [`MaybeUninit::assume_init_mut`](https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#method.assume_init_mut).
-    pub unsafe fn get_next_slices_mut<'a>(&mut self, count: usize) -> Option<MutableSlice<'a, T>> {
-        self.next_chunk_mut(count)
+    pub unsafe fn get_next_slices_mut<'a>(
+        &mut self,
+        count: usize,
+    ) -> Option<<<B as OneRB>::Storage as StorageComponent>::SliceOutputMut<'a>> {
+        use crate::ring_buffer::storage_components::PStorageComponent;
+        self.check(count).then(|| {
+            self.inner
+                .buffer
+                .storage_mut()
+                .next_chunk_mut(self.inner.index, count)
+        })
     }
 }
 
@@ -373,33 +369,36 @@ pub mod test {
     #[test]
     fn cached_avail() {
         use super::*;
-        use crate::{ConcurrentHeapRB, HeapSplit};
 
         const BUFFER_SIZE: usize = 4095;
 
-        let buf = ConcurrentHeapRB::<u32>::default(BUFFER_SIZE + 1);
+        #[cfg(feature = "alloc")]
+        let buf = crate::SharedHeapRB::<u32>::default(BUFFER_SIZE + 1);
+        #[cfg(not(feature = "alloc"))]
+        let mut buf = crate::SharedStackRB::<u32, { BUFFER_SIZE + 1 }>::default();
+
         let (mut prod, mut cons) = buf.split();
 
-        assert_eq!(prod.cached_avail, 0);
+        assert_eq!(prod.inner.cached_avail, 0);
 
         prod.check(1);
 
-        assert_eq!(prod.cached_avail, BUFFER_SIZE);
+        assert_eq!(prod.inner.cached_avail, BUFFER_SIZE);
 
         unsafe {
             prod.advance(2);
         }
 
-        assert_eq!(prod.cached_avail, BUFFER_SIZE - 2);
+        assert_eq!(prod.inner.cached_avail, BUFFER_SIZE - 2);
 
         unsafe {
             cons.advance(1);
         }
 
-        assert_eq!(prod.cached_avail, BUFFER_SIZE - 2);
+        assert_eq!(prod.inner.cached_avail, BUFFER_SIZE - 2);
 
         prod.check(10);
 
-        assert_eq!(prod.cached_avail, BUFFER_SIZE - 2);
+        assert_eq!(prod.inner.cached_avail, BUFFER_SIZE - 2);
     }
 }

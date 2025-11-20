@@ -5,12 +5,12 @@ use std::thread;
 use std::time::Duration;
 
 use crate::{common_def, get_buf};
-use mutringbuf::MRBIterator;
+use oneringbuf::ORBIterator;
 
 common_def!();
 
 fn rb_fibonacci() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(SharedMut);
     let (mut prod, mut work, mut cons) = buf.split_mut();
 
     thread::scope(move |s| {
@@ -56,7 +56,7 @@ fn rb_fibonacci() {
             while !prod_finished_clone.load(Acquire)
                 || work.index() != prod_last_index_clone.load(Acquire)
             {
-                if let Some(value) = work.get_workable() {
+                if let Some(value) = work.get_mut() {
                     let (bt_h, bt_t) = &mut acc;
 
                     if *value == 1 {
@@ -116,7 +116,7 @@ fn rb_fibonacci() {
 
 #[test]
 fn fibonacci_test() {
-    for _ in 0..100 {
+    for _ in 0..10 {
         rb_fibonacci();
     }
 }

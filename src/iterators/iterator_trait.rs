@@ -1,29 +1,21 @@
 use crate::iterators::sync_iterators::detached::Detached;
-use crate::ring_buffer::storage::MRBIndex;
-use crate::ring_buffer::variants::ring_buffer_trait::{IterManager, StorageManager};
-use crate::ring_buffer::wrappers::buf_ref::BufRef;
-use crate::{MutRB, Storage, UnsafeSyncCell};
-use core::mem::transmute;
-use core::slice;
-
-/// Mutable slice returned by slice-specialised functions.
-#[cfg(feature = "vmem")]
-pub type MutableSlice<'a, T> = &'a mut [T];
-#[cfg(not(feature = "vmem"))]
-pub type MutableSlice<'a, T> = (&'a mut [T], &'a mut [T]);
-
-/// Non-mutable slice returned by slice-specialised functions.
-#[cfg(feature = "vmem")]
-pub type NonMutableSlice<'a, T> = &'a [T];
-#[cfg(not(feature = "vmem"))]
-pub type NonMutableSlice<'a, T> = (&'a [T], &'a [T]);
+use crate::ring_buffer::OneRB;
+use crate::ring_buffer::iters_components::PIterComponent;
+use crate::ring_buffer::storage_components::{PStorageComponent, StorageComponent};
 
 /// Trait implemented by iterators.
-#[allow(private_bounds)]
-pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
+///
+/// This trait is not meant to be implemented outside of this crate.
+pub trait ORBIterator: PrivateORBIterator<_Buffer = Self::Buffer> {
+    /// Type of the items stored in the underlying buffer.
     type Item;
+    /// Type of the underlying buffer.
+    type Buffer: OneRB<Item = Self::Item>;
 
-    /// Detaches the iterator yielding a [`Detached`].
+    /// Detaches the iterator, yielding a [`Detached`] iterator.
+    ///
+    /// This allows to "peek" at the buffer's contents without advancing the primary consumer.
+    /// For a more detailed explanation and examples, see the documentation for [`Detached`].
     #[inline]
     fn detach(self) -> Detached<Self>
     where
@@ -35,7 +27,7 @@ pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
     /// Advances the iterator by `count`.
     ///
     /// # Safety
-    /// An iterator should never overstep its successor, so it must always be: `count` <= [`MRBIterator::available()`]!
+    /// An iterator should never overstep its successor, so it must always be: `count` <= [`ORBIterator::available()`]!
     #[inline]
     unsafe fn advance(&mut self, count: usize) {
         unsafe { self._advance(count) };
@@ -61,28 +53,28 @@ pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
     /// Returns the length of the buffer.
     #[inline]
     fn buf_len(&self) -> usize {
-        self.buffer().inner_len()
+        self.buffer().len()
     }
 
     /// Returns how many iterators are still alive.
     fn alive_iters(&self) -> u8 {
-        self.buffer().alive_iters()
+        self.buffer().iters().alive_iters()
     }
 
     /// Returns the index of the producer.
     #[inline(always)]
     fn prod_index(&self) -> usize {
-        self.buffer().prod_index()
+        self.buffer().iters().prod_index()
     }
     /// Returns the index of the worker.
     #[inline(always)]
     fn work_index(&self) -> usize {
-        self.buffer().work_index()
+        self.buffer().iters().work_index()
     }
     /// Returns the index of the consumer.
     #[inline(always)]
     fn cons_index(&self) -> usize {
-        self.buffer().cons_index()
+        self.buffer().iters().cons_index()
     }
 
     /// Returns a mutable references to the current value.
@@ -93,7 +85,7 @@ pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
     /// in order to move the iterator.
     /// </div>
     #[inline]
-    fn get_workable<'a>(&mut self) -> Option<&'a mut Self::Item> {
+    fn get_mut<'a>(&mut self) -> Option<&'a mut Self::Item> {
         self.next_ref_mut()
     }
 
@@ -104,11 +96,15 @@ pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
     /// in order to move the iterator.
     /// </div>
     #[inline]
-    fn get_workable_slice_exact<'a>(
+    fn get_mut_slice_exact<'a>(
         &mut self,
         count: usize,
-    ) -> Option<MutableSlice<'a, <Self as MRBIterator>::Item>> {
-        self.next_chunk_mut(count)
+    ) -> Option<<<Self::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'a>> {
+        self.check(count).then(|| {
+            self.buffer()
+                .storage_mut()
+                .next_chunk_mut(self._index(), count)
+        })
     }
 
     /// Returns a tuple of mutable slice references, the sum of which with len equal to [`Self::available()`].
@@ -118,12 +114,12 @@ pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
     /// in order to move the iterator.
     /// </div>
     #[inline]
-    fn get_workable_slice_avail<'a>(
+    fn get_mut_slice_avail<'a>(
         &mut self,
-    ) -> Option<MutableSlice<'a, <Self as MRBIterator>::Item>> {
+    ) -> Option<<<Self::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'a>> {
         match self.available() {
             0 => None,
-            avail => self.get_workable_slice_exact(avail),
+            avail => self.get_mut_slice_exact(avail),
         }
     }
 
@@ -135,23 +131,25 @@ pub trait MRBIterator: PrivateMRBIterator<Self::Item> {
     /// in order to move the iterator.
     /// </div>
     #[inline]
-    fn get_workable_slice_multiple_of<'a>(
+    fn get_mut_slice_multiple_of<'a>(
         &mut self,
         rhs: usize,
-    ) -> Option<MutableSlice<'a, <Self as MRBIterator>::Item>> {
+    ) -> Option<<<Self::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'a>> {
         let avail = self.available();
 
         unsafe {
             match avail.unchecked_sub(avail % rhs) {
                 0 => None,
-                avail => self.get_workable_slice_exact(avail),
+                avail => self.get_mut_slice_exact(avail),
             }
         }
     }
 }
 
-pub(crate) trait PrivateMRBIterator<T> {
-    fn buffer(&self) -> &BufRef<'_, impl MutRB<Item = T>>;
+pub(crate) trait PrivateORBIterator {
+    type _Buffer: OneRB;
+
+    fn buffer(&self) -> &Self::_Buffer;
     fn _available(&mut self) -> usize;
     fn cached_avail(&self) -> usize;
     fn set_cached_avail(&mut self, avail: usize);
@@ -174,8 +172,8 @@ pub(crate) trait PrivateMRBIterator<T> {
     unsafe fn advance_local(&mut self, count: usize) {
         self.set_local_index(unsafe { self._index().unchecked_add(count) });
 
-        if self._index() >= self.buffer().inner_len() {
-            self.set_local_index(unsafe { self._index().unchecked_sub(self.buffer().inner_len()) });
+        if self._index() >= self.buffer().len() {
+            self.set_local_index(unsafe { self._index().unchecked_sub(self.buffer().len()) });
         }
 
         self.set_cached_avail(self.cached_avail().saturating_sub(count));
@@ -189,9 +187,9 @@ pub(crate) trait PrivateMRBIterator<T> {
 
     /// Returns Some(current element), if `check()` returns `true`, else None
     #[inline]
-    fn next(&mut self) -> Option<T> {
+    fn next(&mut self) -> Option<<Self::_Buffer as OneRB>::Item> {
         self.check(1).then(|| unsafe {
-            let ret = self.buffer().inner()._index(self._index()).take_inner();
+            let ret = self.buffer().storage()._index(self._index()).take_inner();
 
             self._advance(1);
 
@@ -201,11 +199,11 @@ pub(crate) trait PrivateMRBIterator<T> {
 
     /// Returns Some(current element), if `check()` returns `true`, else None. The value is duplicated.
     #[inline]
-    fn next_duplicate(&mut self) -> Option<T> {
+    fn next_duplicate(&mut self) -> Option<<Self::_Buffer as OneRB>::Item> {
         self.check(1).then(|| unsafe {
             let ret = self
                 .buffer()
-                .inner()
+                .storage()
                 ._index(self._index())
                 .inner_duplicate();
 
@@ -217,114 +215,31 @@ pub(crate) trait PrivateMRBIterator<T> {
 
     /// Returns Some(&UnsafeSyncCell<current element>), if `check()` returns `true`, else None
     #[inline]
-    fn next_ref<'a>(&mut self) -> Option<&'a T> {
+    fn next_ref<'a>(&mut self) -> Option<&'a <Self::_Buffer as OneRB>::Item> {
         unsafe {
             self.check(1)
-                .then(|| self.buffer().inner()._index(self._index()).inner_ref())
+                .then(|| self.buffer().storage()._index(self._index()).inner_ref())
         }
     }
 
     /// Returns Some(&UnsafeSyncCell<current element>), if `check()` returns `true`, else None
     #[inline]
-    fn next_ref_mut<'a>(&mut self) -> Option<&'a mut T> {
+    fn next_ref_mut<'a>(&mut self) -> Option<&'a mut <Self::_Buffer as OneRB>::Item> {
         unsafe {
-            self.check(1)
-                .then(|| self.buffer().inner()._index(self._index()).inner_ref_mut())
+            self.check(1).then(|| {
+                self.buffer()
+                    .storage()
+                    ._index(self._index())
+                    .inner_ref_mut()
+            })
         }
     }
 
     /// As next_ref_mut, but can be used for initialisation of inner MaybeUninit.
     #[inline]
-    fn next_ref_mut_init(&mut self) -> Option<*mut T> {
+    fn next_ref_mut_init(&mut self) -> Option<*mut <Self::_Buffer as OneRB>::Item> {
         self.check(1)
-            .then(|| self.buffer().inner()._index(self._index()).as_mut_ptr())
-    }
-
-    #[cfg(feature = "vmem")]
-    #[inline]
-    fn next_chunk<'a>(&mut self, count: usize) -> Option<NonMutableSlice<'a, T>> {
-        self.check(count).then(|| unsafe {
-            transmute::<&[UnsafeSyncCell<T>], &[T]>(slice::from_raw_parts(
-                self.buffer().inner().as_ptr().add(self._index()),
-                count,
-            ))
-        })
-    }
-    #[cfg(feature = "vmem")]
-    #[inline]
-    fn next_chunk_mut<'a>(&mut self, count: usize) -> Option<MutableSlice<'a, T>> {
-        self.check(count).then(|| unsafe {
-            transmute::<&mut [UnsafeSyncCell<T>], &mut [T]>(slice::from_raw_parts_mut(
-                self.buffer().inner_mut().as_mut_ptr().add(self._index()),
-                count,
-            ))
-        })
-    }
-
-    #[cfg(not(feature = "vmem"))]
-    #[inline]
-    fn next_chunk<'a>(&mut self, count: usize) -> Option<NonMutableSlice<'a, T>> {
-        self.check(count).then(|| {
-            let len = self.buffer().inner_len();
-
-            unsafe {
-                let ptr = self.buffer().inner().as_ptr();
-
-                if self._index() + count >= len {
-                    (
-                        transmute::<&[UnsafeSyncCell<T>], &[T]>(slice::from_raw_parts(
-                            ptr.add(self._index()),
-                            len.unchecked_sub(self._index()),
-                        )),
-                        transmute::<&[UnsafeSyncCell<T>], &[T]>(slice::from_raw_parts(
-                            ptr,
-                            self._index().unchecked_add(count).unchecked_sub(len),
-                        )),
-                    )
-                } else {
-                    (
-                        transmute::<&[UnsafeSyncCell<T>], &[T]>(slice::from_raw_parts(
-                            ptr.add(self._index()),
-                            count,
-                        )),
-                        &mut [] as &[T],
-                    )
-                }
-            }
-        })
-    }
-
-    #[cfg(not(feature = "vmem"))]
-    #[inline]
-    fn next_chunk_mut<'a>(&mut self, count: usize) -> Option<MutableSlice<'a, T>> {
-        self.check(count).then(|| {
-            let len = self.buffer().inner_len();
-
-            unsafe {
-                let ptr = self.buffer().inner_mut().as_mut_ptr();
-
-                if self._index() + count >= len {
-                    (
-                        transmute::<&mut [UnsafeSyncCell<T>], &mut [T]>(slice::from_raw_parts_mut(
-                            ptr.add(self._index()),
-                            len.unchecked_sub(self._index()),
-                        )),
-                        transmute::<&mut [UnsafeSyncCell<T>], &mut [T]>(slice::from_raw_parts_mut(
-                            ptr,
-                            self._index().unchecked_add(count).unchecked_sub(len),
-                        )),
-                    )
-                } else {
-                    (
-                        transmute::<&mut [UnsafeSyncCell<T>], &mut [T]>(slice::from_raw_parts_mut(
-                            ptr.add(self._index()),
-                            count,
-                        )),
-                        &mut [] as &mut [T],
-                    )
-                }
-            }
-        })
+            .then(|| self.buffer().storage()._index(self._index()).as_mut_ptr())
     }
 }
 
@@ -332,26 +247,27 @@ pub(crate) mod iter_macros {
     macro_rules! private_impl {
         () => {
             #[inline]
-            fn buffer(&self) -> &BufRef<'_, impl MutRB<Item = T>> {
-                &self.buffer
+            #[allow(refining_impl_trait)]
+            fn buffer(&self) -> &B {
+                &self.inner.buffer
             }
 
             #[inline]
             fn _index(&self) -> usize {
-                self.index
+                self.inner.index
             }
             #[inline]
             fn set_local_index(&mut self, index: usize) {
-                self.index = index;
+                self.inner.index = index;
             }
 
             #[inline]
             fn cached_avail(&self) -> usize {
-                self.cached_avail
+                self.inner.cached_avail
             }
             #[inline]
             fn set_cached_avail(&mut self, avail: usize) {
-                self.cached_avail = avail;
+                self.inner.cached_avail = avail;
             }
         };
     }

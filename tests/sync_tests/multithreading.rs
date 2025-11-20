@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::{common_def, get_buf};
-use mutringbuf::MRBIterator;
+use oneringbuf::ORBIterator;
 use std::thread;
 use std::time::Instant;
 
@@ -48,11 +48,11 @@ macro_rules! get_cons {
 }
 
 #[test]
-fn test_mt_non_workable() {
-    let mut buf = get_buf!(Concurrent);
+fn test_mt_non_mut() {
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
 
     thread::scope(|s| {
         let producer = get_prod!(s, prod);
@@ -72,11 +72,11 @@ fn test_mt_non_workable() {
 }
 
 #[test]
-fn test_mt_workable() {
-    let mut buf = get_buf!(Concurrent);
+fn test_mt_mut() {
+    let mut buf = get_buf!(SharedMut);
     let (mut prod, mut work, mut cons) = buf.split_mut();
 
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(SharedMut);
 
     thread::scope(|s| {
         let producer = get_prod!(s, prod);

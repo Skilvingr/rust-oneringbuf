@@ -1,6 +1,6 @@
 #[cfg(feature = "alloc")]
 fn main() {
-    use mutringbuf::{ConcurrentHeapRB, HeapSplit, MRBIterator};
+    use oneringbuf::{ORBIterator, SharedHeapRB};
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::{Acquire, Release};
@@ -10,7 +10,7 @@ fn main() {
     const RB_SIZE: usize = 4096;
 
     fn f() {
-        let buf = ConcurrentHeapRB::from(vec![0; RB_SIZE]);
+        let buf = SharedHeapRB::from(vec![0; RB_SIZE]);
         let (mut prod, mut cons) = buf.split();
 
         // Flag variable to stop threads
@@ -66,12 +66,6 @@ fn main() {
         let (prod, produced) = producer.join().unwrap();
         let (mut cons, mut consumed) = consumer.join().unwrap();
 
-        // Consume the remaining part of the buffer
-        #[cfg(feature = "vmem")]
-        if let Some(res) = cons.peek_available() {
-            consumed.extend_from_slice(res);
-        }
-        #[cfg(not(feature = "vmem"))]
         if let Some((head, tail)) = cons.peek_available() {
             consumed.extend_from_slice(head);
             consumed.extend_from_slice(tail);
@@ -83,7 +77,7 @@ fn main() {
         drop(cons);
     }
 
-    for _ in 0..50 {
+    for _ in 0..5 {
         f();
     }
 }

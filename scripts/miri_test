@@ -2,7 +2,19 @@
 
 export MIRIFLAGS="-Zmiri-disable-isolation ${MIRIFLAGS:-}"
 
-cargo +nightly miri nextest run --features async &&
-cargo +nightly miri run --example simple &&
-cargo +nightly miri run --example simple_async --features async &&
-cargo +nightly miri run --example uninit_items
+run() {
+    $1 --no-default-features &&
+    $1 --no-default-features --features async &&
+
+    $1 &&
+    $1 --features async
+}
+
+echo "Running tests..." &&
+run "cargo +nightly miri nextest run" &&
+echo "Running example simple..." &&
+run "cargo +nightly miri run --example simple" &&
+echo "Running uninit_items..." &&
+run "cargo +nightly miri run --example uninit_items" &&
+
+cargo +nightly miri run --example simple_async --features async

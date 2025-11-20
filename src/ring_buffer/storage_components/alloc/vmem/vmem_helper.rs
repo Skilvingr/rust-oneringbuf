@@ -1,20 +1,15 @@
-#![cfg_attr(doc, doc(cfg(feature = "vmem")))]
-#![cfg(any(doc, feature = "vmem"))]
-
 //! Utilities for `vmem` optimisation.
 
-use crate::UnsafeSyncCell;
+use crate::utils::UnsafeSyncCell;
 use core::ptr;
 use libc::c_int;
 
 /// Returns the page size in use by the system.
-#[cfg(unix)]
 pub fn page_size() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
 
 /// Returns a multiple of the page size in use by the system.
-#[cfg(unix)]
 pub fn get_page_size_mul(min_size: usize) -> usize {
     let page_size = page_size();
     min_size.div_ceil(page_size) * page_size

@@ -1,9 +1,17 @@
-use crate::iterators::iterator_trait::{MRBIterator, PrivateMRBIterator};
+use crate::iterators::iterator_trait::{ORBIterator, PrivateORBIterator};
 use crate::iterators::private_impl;
+use crate::iterators::sync_iterators::Iter;
 #[allow(unused_imports)]
 use crate::iterators::sync_iterators::detached::Detached;
-use crate::ring_buffer::variants::ring_buffer_trait::{ConcurrentRB, IterManager, MutRB};
-use crate::ring_buffer::wrappers::buf_ref::BufRef;
+use crate::ring_buffer::OneRB;
+use crate::ring_buffer::wrappers::refs::IntoRef;
+use crate::ring_buffer::{SharedRB, iters_components::PIterComponent};
+use crate::storage_components::PStorageComponent;
+#[cfg(feature = "async")]
+use crate::{
+    iterators::{AsyncWorkIter, async_iterators::AsyncIterator},
+    iters_components::async_iters::AsyncIterComp,
+};
 
 #[doc = r##"
 Iterator used to mutate elements in-place.
@@ -18,61 +26,64 @@ in order to move the iterator.
 [`Self::advance`] updates a global iterator, which is read by the consumer to decide if it can move on.
 To avoid this [`Detached`] can be obtained by calling [`Self::detach`].
 "##]
-pub struct WorkIter<'buf, B: MutRB> {
-    pub(crate) index: usize,
-    pub(crate) cached_avail: usize,
-    pub(crate) buffer: BufRef<'buf, B>,
+#[repr(transparent)]
+pub struct WorkIter<B: IntoRef + OneRB> {
+    pub(crate) inner: Iter<B>,
 }
 
-unsafe impl<B: ConcurrentRB + MutRB<Item = T>, T> Send for WorkIter<'_, B> {}
+unsafe impl<B: IntoRef + OneRB + SharedRB> Send for WorkIter<B> {}
 
-impl<B: MutRB + IterManager> Drop for WorkIter<'_, B> {
-    fn drop(&mut self) {
-        self.buffer.drop_iter();
-    }
-}
+impl<B: IntoRef + OneRB<Item = T>, T> PrivateORBIterator for WorkIter<B> {
+    type _Buffer = B;
 
-impl<B: MutRB<Item = T>, T> PrivateMRBIterator<T> for WorkIter<'_, B> {
     #[inline]
     fn _available(&mut self) -> usize {
         let succ_idx = self.succ_index();
 
         unsafe {
-            self.cached_avail = match self.index <= succ_idx {
-                true => succ_idx.unchecked_sub(self.index),
+            self.inner.cached_avail = match self.inner.index <= succ_idx {
+                true => succ_idx.unchecked_sub(self.inner.index),
                 false => self
-                    .buf_len()
-                    .unchecked_sub(self.index)
+                    .buffer()
+                    .storage()
+                    .len()
+                    .unchecked_sub(self.inner.index)
                     .unchecked_add(succ_idx),
             };
         }
 
-        self.cached_avail
+        self.inner.cached_avail
     }
 
     #[inline]
     fn set_atomic_index(&self, index: usize) {
-        self.buffer.set_work_index(index);
+        self.inner.buffer.iters().set_work_index(index);
     }
 
     #[inline]
     fn succ_index(&self) -> usize {
-        self.buffer.prod_index()
+        self.inner.buffer.iters().prod_index()
     }
 
     private_impl!();
 }
 
-impl<B: MutRB<Item = T>, T> MRBIterator for WorkIter<'_, B> {
+impl<B: IntoRef + OneRB<Item = T>, T> ORBIterator for WorkIter<B> {
     type Item = T;
+    type Buffer = B;
 }
 
-impl<'buf, B: MutRB<Item = T>, T> WorkIter<'buf, B> {
-    pub(crate) fn new(value: BufRef<'buf, B>) -> WorkIter<'buf, B> {
+#[cfg(feature = "async")]
+impl<B: IntoRef + OneRB<Iters: AsyncIterComp>> WorkIter<B> {
+    pub fn into_async(self) -> AsyncWorkIter<B> {
+        AsyncIterator::from_sync(self)
+    }
+}
+
+impl<B: IntoRef + OneRB<Item = T>, T> WorkIter<B> {
+    pub(crate) fn new(value: B::TargetRef) -> Self {
         Self {
-            index: 0,
-            buffer: value,
-            cached_avail: 0,
+            inner: Iter::new(value),
         }
     }
 
@@ -80,7 +91,7 @@ impl<'buf, B: MutRB<Item = T>, T> WorkIter<'buf, B> {
     #[inline]
     pub fn reset_index(&mut self) {
         let new_idx = self.succ_index();
-        self.index = new_idx;
+        self.inner.index = new_idx;
         self.set_atomic_index(new_idx);
     }
 }

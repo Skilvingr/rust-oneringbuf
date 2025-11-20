@@ -1,20 +1,25 @@
 #[cfg(doc)]
 use crate::iterators::ProdIter;
-
 #[cfg(any(feature = "async", doc))]
-use crate::ring_buffer::variants::async_rb::AsyncMutRingBuf;
-use crate::{ConcurrentMutRingBuf, LocalMutRingBuf, StackStorage, UnsafeSyncCell};
+use crate::{AsyncStackRB, ring_buffer::types::AsyncStackRBMut};
+
+use crate::storage_components::StackStorage;
+use crate::{
+    LocalStackRB, SharedStackRB,
+    ring_buffer::types::{LocalStackRBMut, SharedStackRBMut},
+    utils::UnsafeSyncCell,
+};
 
 macro_rules! impl_rb {
     ($t: tt) => {
-        impl<T, const N: usize> From<[T; N]> for $t<T, N> {
+        impl<'buf, T, const N: usize> From<[T; N]> for $t<'buf, T, N> {
             #[doc = concat!("Converts an array into a [`", stringify!($t), "`].")]
             fn from(value: [T; N]) -> Self {
                 Self::_from(StackStorage::from(value))
             }
         }
 
-        impl<T, const N: usize> $t<T, N> {
+        impl<'buf, T, const N: usize> $t<'buf, T, N> {
             #[doc = concat!("Creates a new [`", stringify!($t), "`] with given capacity and zeroed (uninitialised) elements.")]
             /// # Safety
             /// The buffer must be then initialised using proper [`ProdIter`] methods (`*_init` ones).
@@ -25,7 +30,7 @@ macro_rules! impl_rb {
             }
         }
 
-        impl<T: Default + Copy, const N: usize> Default for $t<T, N> {
+        impl<'buf, T: Default + Copy, const N: usize> Default for $t<'buf, T, N> {
             #[doc = concat!("Creates a new [`", stringify!($t), "`] with given capacity and elements initialised to `default`.")]
             fn default() -> Self {
                 Self::from([T::default(); N])
@@ -34,18 +39,12 @@ macro_rules! impl_rb {
     };
 }
 
-/// A stack-allocated asynchronous ring buffer usable in concurrent environment.
-#[cfg(any(feature = "async", doc))]
-pub type AsyncStackRB<T, const N: usize> = AsyncMutRingBuf<StackStorage<T, N>>;
 #[cfg(any(feature = "async", doc))]
 impl_rb!(AsyncStackRB);
+#[cfg(any(feature = "async", doc))]
+impl_rb!(AsyncStackRBMut);
 
-/// A stack-allocated ring buffer usable in concurrent environment.
-pub type ConcurrentStackRB<T, const N: usize> = ConcurrentMutRingBuf<StackStorage<T, N>>;
-
-impl_rb!(ConcurrentStackRB);
-
-/// A stack-allocated ring buffer usable in local environment.
-pub type LocalStackRB<T, const N: usize> = LocalMutRingBuf<StackStorage<T, N>>;
-
+impl_rb!(SharedStackRB);
+impl_rb!(SharedStackRBMut);
 impl_rb!(LocalStackRB);
+impl_rb!(LocalStackRBMut);

@@ -2,12 +2,12 @@
 fn main() {
     use std::rc::Rc;
 
-    use mutringbuf::{ConcurrentHeapRB, HeapSplit, MRBIterator};
+    use oneringbuf::{ORBIterator, SharedHeapRB};
 
     const RB_SIZE: usize = 4095;
 
     // Indices from 0 to RB_SIZE+1 are uninitialised
-    let buf = unsafe { ConcurrentHeapRB::new_zeroed(RB_SIZE + 1) };
+    let buf = unsafe { SharedHeapRB::new_zeroed(RB_SIZE + 1) };
     let (mut prod, mut cons) = buf.split();
 
     let slice = (0..RB_SIZE).map(Rc::new).collect::<Vec<Rc<usize>>>();

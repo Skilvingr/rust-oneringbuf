@@ -1,8 +1,15 @@
+use crate::OneRB;
+use crate::StorageComponent;
 #[allow(unused_imports)]
 use crate::iterators::WorkIter;
-use crate::iterators::iterator_trait::{MRBIterator, MutableSlice};
+use crate::iterators::iterator_trait::ORBIterator;
 use crate::iterators::util_macros::delegate;
 use crate::iterators::util_macros::muncher;
+#[cfg(feature = "async")]
+use crate::{
+    iterators::{AsyncDetached, async_iterators::AsyncIterator},
+    iters_components::async_iters::AsyncIterComp,
+};
 
 #[doc = r##"
 Detached iterator: does not update the atomic index when advancing.
@@ -12,7 +19,7 @@ This makes it possible to explore available data back and forth, putting other i
 A typical use case of this structure is to search something amidst produced data, aligning the detached
 iterator to a suitable index and then returning to a normal iterator.
 
-This struct can only be created by [`detaching`](MRBIterator::detach) an iterator.
+This struct can only be created by [`detaching`](ORBIterator::detach) an iterator.
 
 When done worker iterator can be re-obtained via [`Self::attach`].
 
@@ -26,13 +33,21 @@ Thus, as stated in the docs written for the former, [`Self::advance`] has to be 
 in order to move the iterator.
 </div>
 "##]
-pub struct Detached<I: MRBIterator> {
+#[repr(transparent)]
+pub struct Detached<I: ORBIterator> {
     inner: I,
 }
 
-unsafe impl<I: MRBIterator> Send for Detached<I> {}
+unsafe impl<I: ORBIterator> Send for Detached<I> {}
 
-impl<T, I: MRBIterator<Item = T>> Detached<I> {
+#[cfg(feature = "async")]
+impl<'buf, I: ORBIterator<Buffer: OneRB<Iters: AsyncIterComp>>> Detached<I> {
+    pub fn into_async<AS: AsyncIterator<'buf, I = I>>(self) -> AsyncDetached<'buf, AS> {
+        AsyncDetached::from_iter(AsyncIterator::from_sync(self.inner))
+    }
+}
+
+impl<T, I: ORBIterator<Item = T>> Detached<I> {
     /// Creates a [`Self`] from an iterator.
     #[inline]
     pub(crate) fn from_iter(iter: I) -> Detached<I> {
@@ -46,17 +61,19 @@ impl<T, I: MRBIterator<Item = T>> Detached<I> {
         self.inner
     }
 
+    #[inline]
     fn inner(&self) -> &I {
         &self.inner
     }
+    #[inline]
     fn inner_mut(&mut self) -> &mut I {
         &mut self.inner
     }
 
-    delegate!(MRBIterator (inline), pub fn available(&(mut) self) -> usize);
-    delegate!(MRBIterator (inline), pub fn wait_for(&(mut) self, count: usize));
-    delegate!(MRBIterator (inline), pub fn index(&self) -> usize);
-    delegate!(MRBIterator (inline), pub fn buf_len(&self) -> usize);
+    delegate!(ORBIterator (inline), pub fn available(&(mut) self) -> usize);
+    delegate!(ORBIterator (inline), pub fn wait_for(&(mut) self, count: usize));
+    delegate!(ORBIterator (inline), pub fn index(&self) -> usize);
+    delegate!(ORBIterator (inline), pub fn buf_len(&self) -> usize);
 
     /// Sets the *local* index. To sync the atomic index, use [`Self::sync_index`].
     ///
@@ -75,11 +92,11 @@ impl<T, I: MRBIterator<Item = T>> Detached<I> {
         self.inner.set_local_index(new_idx);
     }
 
-    /// Advances the iterator as in [`MRBIterator::advance()`], but does not modify the atomic counter,
+    /// Advances the iterator as in [`ORBIterator::advance()`], but does not modify the atomic counter,
     /// making the change local.
     ///
     /// # Safety
-    /// See [`MRBIterator::advance`].
+    /// See [`ORBIterator::advance`].
     #[inline]
     pub unsafe fn advance(&mut self, count: usize) {
         unsafe { self.inner.advance_local(count) };
@@ -102,14 +119,14 @@ impl<T, I: MRBIterator<Item = T>> Detached<I> {
             .set_cached_avail(unsafe { cached_avail.unchecked_add(count) });
     }
 
-    delegate!(MRBIterator (inline), pub fn prod_index(&self) -> usize);
-    delegate!(MRBIterator (inline), pub fn work_index(&self) -> usize);
-    delegate!(MRBIterator (inline), pub fn cons_index(&self) -> usize);
+    delegate!(ORBIterator (inline), pub fn prod_index(&self) -> usize);
+    delegate!(ORBIterator (inline), pub fn work_index(&self) -> usize);
+    delegate!(ORBIterator (inline), pub fn cons_index(&self) -> usize);
 
-    delegate!(MRBIterator (inline), pub fn get_workable(&(mut) self) -> Option<&'_ mut T>);
-    delegate!(MRBIterator (inline), pub fn get_workable_slice_exact(&(mut) self, count: usize) -> Option<MutableSlice<'_, T>>);
-    delegate!(MRBIterator (inline), pub fn get_workable_slice_avail(&(mut) self) -> Option<MutableSlice<'_, T>>);
-    delegate!(MRBIterator (inline), pub fn get_workable_slice_multiple_of(&(mut) self, rhs: usize) -> Option<MutableSlice<'_, T>>);
+    delegate!(ORBIterator (inline), pub fn get_mut(&(mut) self) -> Option<&'_ mut T>);
+    delegate!(ORBIterator (inline), pub fn get_mut_slice_exact(&(mut) self, count: usize) -> Option<<<I::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'_>>);
+    delegate!(ORBIterator (inline), pub fn get_mut_slice_avail(&(mut) self) -> Option<<<I::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'_>>);
+    delegate!(ORBIterator (inline), pub fn get_mut_slice_multiple_of(&(mut) self, rhs: usize) -> Option<<<I::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'_>>);
 
     /// Synchronises the underlying atomic index with the local index. I.e. let the consumer iterator
     /// advance.

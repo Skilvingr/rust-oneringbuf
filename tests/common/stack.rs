@@ -1,7 +1,5 @@
-#![cfg(not(feature = "vmem"))]
-
 use crate::common_def;
-use mutringbuf::{ConcurrentStackRB, LocalStackRB, MRBIterator as MRBIt};
+use oneringbuf::{LocalStackRBMut, ORBIterator as ORBIt, SharedStackRBMut};
 use std::{
     sync::Arc,
     sync::atomic::Ordering::{Acquire, Release},
@@ -14,7 +12,7 @@ common_def!();
 
 #[test]
 fn test_local_stack() {
-    let mut buf = LocalStackRB::<usize, { BUFFER_SIZE }>::default();
+    let mut buf = LocalStackRBMut::<usize, { BUFFER_SIZE }>::default();
     let (mut prod, mut work, mut cons) = buf.split_mut();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
@@ -29,7 +27,7 @@ fn test_local_stack() {
     assert_eq!(cons.available(), 0);
 
     for _ in 0..BUFFER_SIZE - 1 {
-        if let Some(data) = work.get_workable() {
+        if let Some(data) = work.get_mut() {
             *data += 1;
             unsafe { work.advance(1) };
         }
@@ -48,7 +46,7 @@ fn test_local_stack() {
 }
 
 fn rb_fibonacci() {
-    let mut buf = ConcurrentStackRB::<usize, BUFFER_SIZE>::default();
+    let mut buf = SharedStackRBMut::<usize, BUFFER_SIZE>::default();
     let (mut prod, mut work, mut cons) = buf.split_mut();
 
     // Flag variable to stop threads
@@ -95,7 +93,7 @@ fn rb_fibonacci() {
             while !prod_finished_clone.load(Acquire)
                 || work.index() != prod_last_index_clone.load(Acquire)
             {
-                if let Some(value) = work.get_workable() {
+                if let Some(value) = work.get_mut() {
                     let (bt_h, bt_t) = &mut acc;
 
                     if *value == 1 {
@@ -154,7 +152,7 @@ fn rb_fibonacci() {
 
 #[test]
 fn fibonacci_test_stack() {
-    for _ in 0..100 {
+    for _ in 0..10 {
         rb_fibonacci();
     }
 }

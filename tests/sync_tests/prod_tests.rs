@@ -1,13 +1,13 @@
 extern crate alloc;
 
 use crate::{common_def, get_buf};
-use mutringbuf::MRBIterator;
+use oneringbuf::ORBIterator;
 
 common_def!();
 
 #[test]
 fn test_push_one_by_one() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, _cons) = buf.split();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
@@ -20,7 +20,7 @@ fn test_push_one_by_one() {
 
 #[test]
 fn test_push_slice() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, _cons) = buf.split();
 
     let half_slice = (0..BUFFER_SIZE / 2 - 1).collect::<Vec<usize>>();
@@ -42,7 +42,7 @@ fn test_push_slice() {
 #[test]
 #[allow(clippy::unnecessary_cast)]
 fn test_push_mut_ref_init() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
@@ -65,7 +65,7 @@ fn test_push_mut_ref_init() {
 #[test]
 #[allow(clippy::unnecessary_cast)]
 fn test_push_mut_ref() {
-    let mut buf = get_buf!(Concurrent);
+    let mut buf = get_buf!(Shared);
     let (mut prod, mut cons) = buf.split();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);

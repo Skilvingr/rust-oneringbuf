@@ -1,20 +1,20 @@
 extern crate alloc;
 
 use crate::{common_def, get_buf};
-use mutringbuf::iterators::ProdIter;
-use mutringbuf::{MRBIterator, MutRB};
+use oneringbuf::iterators::ProdIter;
+use oneringbuf::{IntoRef, ORBIterator, OneRB};
 
 common_def!();
 const MULTIPLE: usize = 42;
 
-fn fill_buf(prod: &mut ProdIter<impl MutRB<Item = usize>>) {
+fn fill_buf(prod: &mut ProdIter<impl IntoRef + OneRB<Item = usize>>) {
     let slice = (0..BUFFER_SIZE - 1).collect::<Vec<usize>>();
     prod.push_slice(&slice);
 }
 
 #[test]
 fn test_work_single() {
-    let (mut prod, mut work, mut cons) = get_buf!(Concurrent).split_mut();
+    let (mut prod, mut work, mut cons) = get_buf!(SharedMut).split_mut();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
     assert_eq!(work.available(), 0);
@@ -27,7 +27,7 @@ fn test_work_single() {
     assert_eq!(cons.available(), 0);
 
     for _ in 0..BUFFER_SIZE - 1 {
-        if let Some(data) = work.get_workable() {
+        if let Some(data) = work.get_mut() {
             *data += 1;
             unsafe { work.advance(1) };
         }
@@ -47,7 +47,7 @@ fn test_work_single() {
 
 #[test]
 fn test_work_mul() {
-    let (mut prod, mut work, mut cons) = get_buf!(Concurrent).split_mut();
+    let (mut prod, mut work, mut cons) = get_buf!(SharedMut).split_mut();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
     assert_eq!(work.available(), 0);
@@ -59,7 +59,7 @@ fn test_work_mul() {
     assert_eq!(work.available(), BUFFER_SIZE - 1);
     assert_eq!(cons.available(), 0);
 
-    if let Some(res) = work.get_workable_slice_multiple_of(MULTIPLE) {
+    if let Some(res) = work.get_mut_slice_multiple_of(MULTIPLE) {
         res.iter_mut().for_each(|v| *v += 1);
         unsafe { work.advance(res.len()) };
     }
@@ -80,7 +80,7 @@ fn test_work_mul() {
     assert_eq!(work.available(), rem - 1);
     assert_eq!(cons.available(), 0);
 
-    if let Some(res) = work.get_workable_slice_avail() {
+    if let Some(res) = work.get_mut_slice_avail() {
         res.iter_mut().for_each(|v| *v += 1);
         unsafe { work.advance(res.len()) };
     }
@@ -99,7 +99,7 @@ fn test_work_mul() {
 }
 #[test]
 fn test_work_exact() {
-    let (mut prod, mut work, mut cons) = get_buf!(Concurrent).split_mut();
+    let (mut prod, mut work, mut cons) = get_buf!(SharedMut).split_mut();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
     assert_eq!(work.available(), 0);
@@ -114,7 +114,7 @@ fn test_work_exact() {
     let step = 10;
     let max = 30;
     for _ in 0..max {
-        if let Some(res) = work.get_workable_slice_exact(step) {
+        if let Some(res) = work.get_mut_slice_exact(step) {
             res.iter_mut().for_each(|v| *v += 1);
             unsafe { work.advance(res.len()) };
         }

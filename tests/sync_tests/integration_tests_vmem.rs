@@ -1,18 +1,18 @@
 extern crate alloc;
 
 use crate::{common_def, get_buf};
-use mutringbuf::{ConcurrentHeapRB, MRBIterator};
+use oneringbuf::{ORBIterator, SharedHeapRB};
 
 common_def!();
 
 #[test]
 fn test_odd_sizes() {
-    let _ = ConcurrentHeapRB::from(vec![[0; 4096]; 5]);
+    let _ = SharedHeapRB::from(vec![[0; 4096]; 5]);
 }
 
 #[test]
 fn test_push_work_pop_single() {
-    let (mut prod, mut work, mut cons) = get_buf!(Concurrent).split_mut();
+    let (mut prod, mut work, mut cons) = get_buf!(SharedMut).split_mut();
 
     assert_eq!(prod.available(), BUFFER_SIZE - 1);
     assert_eq!(work.available(), 0);
@@ -26,7 +26,7 @@ fn test_push_work_pop_single() {
     assert_eq!(cons.available(), 0);
 
     for _ in 0..BUFFER_SIZE - 1 {
-        if let Some(data) = work.get_workable() {
+        if let Some(data) = work.get_mut() {
             *data += 1;
             unsafe { work.advance(1) };
         }
@@ -46,7 +46,7 @@ fn test_push_work_pop_single() {
 
 #[test]
 fn test_push_work_pop_slice() {
-    let (mut prod, mut work, mut cons) = get_buf!(Concurrent).split_mut();
+    let (mut prod, mut work, mut cons) = get_buf!(SharedMut).split_mut();
 
     let slice = (0..BUFFER_SIZE - 1).collect::<Vec<usize>>();
 
@@ -60,7 +60,7 @@ fn test_push_work_pop_slice() {
     assert_eq!(work.available(), BUFFER_SIZE - 1);
     assert_eq!(cons.available(), 0);
 
-    if let Some(res) = work.get_workable_slice_exact(BUFFER_SIZE - 1) {
+    if let Some(res) = work.get_mut_slice_exact(BUFFER_SIZE - 1) {
         for i in res {
             *i += 1;
         }
@@ -85,7 +85,7 @@ fn test_push_work_pop_slice() {
 
 #[test]
 fn test_reset() {
-    let (mut prod, mut work, mut cons) = get_buf!(Concurrent).split_mut();
+    let (mut prod, mut work, mut cons) = get_buf!(SharedMut).split_mut();
 
     let two_thirds_slice = (0..BUFFER_SIZE / 3 * 2).collect::<Vec<usize>>();
     let slice = (0..BUFFER_SIZE - 1).collect::<Vec<usize>>();

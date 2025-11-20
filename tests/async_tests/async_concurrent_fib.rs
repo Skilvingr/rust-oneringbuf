@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::{
     sync::{
         Arc,
@@ -9,19 +10,19 @@ use std::{
     time::Instant,
 };
 
-use mutringbuf::iterators::async_iterators::AsyncIterator;
+use oneringbuf::iterators::async_iterators::AsyncIterator;
+use oneringbuf::utils::UnsafeSyncCell;
 
 use crate::common_def;
 
-common_def!(buf);
+common_def!();
 
-async fn rb_fibonacci() {
-    #[cfg(not(feature = "vmem"))]
-    let buf = mutringbuf::AsyncStackRB::from([0; BUFFER_SIZE]);
-    #[cfg(feature = "vmem")]
-    let buf = mutringbuf::AsyncHeapRB::from(vec![0; BUFFER_SIZE]);
+static BUF: LazyLock<UnsafeSyncCell<oneringbuf::AsyncStackRBMut<usize, BUFFER_SIZE>>> =
+    LazyLock::new(|| oneringbuf::AsyncStackRBMut::from([0; BUFFER_SIZE]).into());
 
-    let (mut as_prod, mut as_work, mut as_cons) = buf.split_mut();
+#[tokio::test]
+async fn async_fibonacci_test() {
+    let (mut as_prod, mut as_work, mut as_cons) = unsafe { BUF.inner_ref_mut().split_async_mut() };
 
     // Flag variable to stop threads
     let stop_prod = Arc::new(AtomicBool::new(false));
@@ -65,7 +66,7 @@ async fn rb_fibonacci() {
         while !prod_finished_clone.load(Acquire)
             || as_work.index() != prod_last_index_clone.load(Acquire)
         {
-            if let Some(value) = as_work.get_workable().await {
+            if let Some(value) = as_work.get_mut().await {
                 let (bt_h, bt_t) = &mut acc;
 
                 if *value == 1 {
@@ -123,13 +124,6 @@ async fn rb_fibonacci() {
     //println!("{:?}", produced);
     //println!("{:?}", consumed);
     //println!("{:?}", produced.iter().map(|v| fib(*v)).collect::<Vec<usize>>())
-}
-
-#[tokio::test]
-async fn async_fibonacci_test() {
-    for _ in 0..10 {
-        rb_fibonacci().await;
-    }
 }
 
 pub fn fib(n: usize) -> usize {

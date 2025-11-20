@@ -1,6 +1,6 @@
 use gungraun::main;
 use gungraun::{library_benchmark, library_benchmark_group};
-use mutringbuf::{HeapSplit, LocalHeapRB};
+use oneringbuf::LocalHeapRB;
 use std::hint::black_box;
 
 const BUFFER_SIZE: usize = 4096;

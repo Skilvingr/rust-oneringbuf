@@ -1,2 +1,2 @@
-pub mod buf_ref;
+pub mod refs;
 pub mod unsafe_sync_cell;

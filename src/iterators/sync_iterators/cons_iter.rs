@@ -1,9 +1,18 @@
 #[allow(unused_imports)]
 use crate::iterators::ProdIter;
-use crate::iterators::iterator_trait::{MRBIterator, NonMutableSlice, PrivateMRBIterator};
+use crate::iterators::iterator_trait::{ORBIterator, PrivateORBIterator};
+use crate::iterators::sync_iterators::Iter;
 use crate::iterators::{copy_from_slice_unchecked, private_impl};
-use crate::ring_buffer::variants::ring_buffer_trait::{ConcurrentRB, IterManager, MutRB};
-use crate::ring_buffer::wrappers::buf_ref::BufRef;
+use crate::ring_buffer::OneRB;
+use crate::ring_buffer::storage_components::PStorageComponent;
+use crate::ring_buffer::storage_components::StorageComponent;
+use crate::ring_buffer::wrappers::refs::IntoRef;
+use crate::ring_buffer::{SharedRB, iters_components::PIterComponent};
+#[cfg(feature = "async")]
+use crate::{
+    iterators::{AsyncConsIter, async_iterators::AsyncIterator},
+    iters_components::async_iters::AsyncIterComp,
+};
 
 #[doc = r##"
 Iterator used to pop data from the buffer.
@@ -11,65 +20,64 @@ Iterator used to pop data from the buffer.
 When working with types which implement both [`Copy`] and [`Clone`] traits, `copy` methods should be
 preferred over `clone` methods.
 "##]
-pub struct ConsIter<'buf, B: MutRB, const W: bool> {
-    index: usize,
-    cached_avail: usize,
-    buffer: BufRef<'buf, B>,
+#[repr(transparent)]
+pub struct ConsIter<B: IntoRef + OneRB> {
+    inner: Iter<B>,
 }
 
-unsafe impl<B: ConcurrentRB + MutRB<Item = T>, T, const W: bool> Send for ConsIter<'_, B, W> {}
+unsafe impl<B: IntoRef + OneRB + SharedRB> Send for ConsIter<B> {}
 
-impl<B: MutRB + IterManager, const W: bool> Drop for ConsIter<'_, B, W> {
-    fn drop(&mut self) {
-        self.buffer.drop_iter();
-    }
-}
+impl<B: IntoRef + OneRB<Item = T>, T> PrivateORBIterator for ConsIter<B> {
+    type _Buffer = B;
 
-impl<B: MutRB<Item = T>, T, const W: bool> PrivateMRBIterator<T> for ConsIter<'_, B, W> {
     #[inline]
     fn _available(&mut self) -> usize {
         let succ_idx = self.succ_index();
 
         unsafe {
-            self.cached_avail = match self.index <= succ_idx {
-                true => succ_idx.unchecked_sub(self.index),
+            self.inner.cached_avail = match self.inner.index <= succ_idx {
+                true => succ_idx.unchecked_sub(self.inner.index),
                 false => self
-                    .buf_len()
-                    .unchecked_sub(self.index)
+                    .buffer()
+                    .storage()
+                    .len()
+                    .unchecked_sub(self.inner.index)
                     .unchecked_add(succ_idx),
             };
         }
 
-        self.cached_avail
+        self.inner.cached_avail
     }
 
     #[inline]
     fn set_atomic_index(&self, index: usize) {
-        self.buffer.set_cons_index(index);
+        self.inner.buffer.iters().set_cons_index(index);
     }
 
     #[inline]
     fn succ_index(&self) -> usize {
-        if W {
-            self.buffer.work_index()
-        } else {
-            self.buffer.prod_index()
-        }
+        self.inner.buffer.iters().middle_iter_idx()
     }
 
     private_impl!();
 }
 
-impl<B: MutRB<Item = T>, T, const W: bool> MRBIterator for ConsIter<'_, B, W> {
+impl<B: IntoRef + OneRB<Item = T>, T> ORBIterator for ConsIter<B> {
     type Item = T;
+    type Buffer = B;
 }
 
-impl<'buf, B: MutRB<Item = T>, T, const W: bool> ConsIter<'buf, B, W> {
-    pub(crate) fn new(value: BufRef<'buf, B>) -> Self {
+#[cfg(feature = "async")]
+impl<B: IntoRef + OneRB<Iters: AsyncIterComp>> ConsIter<B> {
+    pub fn into_async(self) -> AsyncConsIter<B> {
+        AsyncIterator::from_sync(self)
+    }
+}
+
+impl<B: IntoRef + OneRB<Item = T>, T> ConsIter<B> {
+    pub(crate) fn new(value: B::TargetRef) -> Self {
         Self {
-            index: 0,
-            buffer: value,
-            cached_avail: 0,
+            inner: Iter::new(value),
         }
     }
 
@@ -77,7 +85,7 @@ impl<'buf, B: MutRB<Item = T>, T, const W: bool> ConsIter<'buf, B, W> {
     #[inline]
     pub fn reset_index(&mut self) {
         let new_idx = self.succ_index();
-        self.index = new_idx;
+        self.inner.index = new_idx;
         self.set_atomic_index(new_idx);
     }
 
@@ -99,8 +107,16 @@ impl<'buf, B: MutRB<Item = T>, T, const W: bool> ConsIter<'buf, B, W> {
     /// in order to move the iterator.
     /// </div>
     #[inline]
-    pub fn peek_slice<'a>(&mut self, count: usize) -> Option<NonMutableSlice<'a, T>> {
-        self.next_chunk(count)
+    pub fn peek_slice<'a>(
+        &mut self,
+        count: usize,
+    ) -> Option<<<B as OneRB>::Storage as StorageComponent>::SliceOutput<'a>> {
+        self.check(count).then(|| {
+            self.inner
+                .buffer
+                .storage()
+                .next_chunk(self.inner.index, count)
+        })
     }
 
     /// Returns a tuple of slice references, the sum of which with len equal to available data.
@@ -110,7 +126,9 @@ impl<'buf, B: MutRB<Item = T>, T, const W: bool> ConsIter<'buf, B, W> {
     /// in order to move the iterator.
     /// </div>
     #[inline]
-    pub fn peek_available<'a>(&mut self) -> Option<NonMutableSlice<'a, T>> {
+    pub fn peek_available<'a>(
+        &mut self,
+    ) -> Option<<<B as OneRB>::Storage as StorageComponent>::SliceOutput<'a>> {
         match self.available() {
             0 => None,
             avail => self.peek_slice(avail),
@@ -183,43 +201,17 @@ impl<'buf, B: MutRB<Item = T>, T, const W: bool> ConsIter<'buf, B, W> {
         self._extract_item(dst, f)
     }
 
-    #[cfg(feature = "vmem")]
     #[inline]
     fn _extract_slice(&mut self, dst: &mut [T], f: fn(&[T], &mut [T])) -> Option<()> {
         let count = dst.len();
 
-        if let Some(binding) = self.next_chunk(count) {
-            unsafe {
-                f(binding, dst);
-                self.advance(count)
-            }
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    #[cfg(not(feature = "vmem"))]
-    #[inline]
-    fn _extract_slice(&mut self, dst: &mut [T], f: fn(&[T], &mut [T])) -> Option<()> {
-        let count = dst.len();
-
-        if let Some((binding_h, binding_t)) = self.next_chunk_mut(count) {
-            let mid = binding_h.len();
-            if mid == dst.len() {
-                f(binding_h, dst);
-            } else {
-                unsafe {
-                    f(binding_h, dst.get_unchecked_mut(..mid));
-                    f(binding_t, dst.get_unchecked_mut(mid..));
-                }
-            }
-
+        self.check(count).then(|| {
+            self.inner
+                .buffer
+                .storage_mut()
+                ._extract_slice(self.inner.index, dst, f);
             unsafe { self.advance(count) };
-            Some(())
-        } else {
-            None
-        }
+        })
     }
 
     /// - Returns `Some(())`, filling `dst` slice with the next `dst.len()` values, if available.
@@ -265,29 +257,32 @@ mod test {
     #[test]
     fn cached_avail() {
         use super::*;
-        use crate::{ConcurrentHeapRB, HeapSplit};
 
         const BUFFER_SIZE: usize = 100;
 
-        let buf = ConcurrentHeapRB::<u32>::default(BUFFER_SIZE + 1);
+        #[cfg(feature = "alloc")]
+        let buf = crate::SharedHeapRB::<u32>::default(BUFFER_SIZE + 1);
+        #[cfg(not(feature = "alloc"))]
+        let mut buf = crate::SharedStackRB::<u32, { BUFFER_SIZE + 1 }>::default();
+
         let (mut prod, mut cons) = buf.split();
 
-        assert_eq!(cons.cached_avail, 0);
+        assert_eq!(cons.inner.cached_avail, 0);
 
         unsafe {
             prod.advance(10);
         }
 
-        assert_eq!(cons.cached_avail, 0);
+        assert_eq!(cons.inner.cached_avail, 0);
 
         cons.check(1);
 
-        assert_eq!(cons.cached_avail, 10);
+        assert_eq!(cons.inner.cached_avail, 10);
 
         unsafe {
             cons.advance(9);
         }
 
-        assert_eq!(cons.cached_avail, 1);
+        assert_eq!(cons.inner.cached_avail, 1);
     }
 }

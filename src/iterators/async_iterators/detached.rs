@@ -1,28 +1,39 @@
+use crate::OneRB;
+use crate::StorageComponent;
 use crate::iterators::async_iterators::AsyncIterator;
 use core::marker::PhantomData;
 
+use crate::ORBIterator;
 #[allow(unused_imports)]
 use crate::iterators::Detached;
-use crate::iterators::iterator_trait::PrivateMRBIterator;
-use crate::{MRBIterator, MutRB};
+use crate::iterators::async_iterators::ORBFuture;
+use crate::iterators::iterator_trait::PrivateORBIterator;
+use crate::iterators::util_macros::delegate;
+use crate::iterators::util_macros::muncher;
 
 #[doc = r##"
 Async version of [`Detached`].
 "##]
-pub struct AsyncDetached<'buf, I: AsyncIterator<'buf>, B: MutRB> {
+#[repr(transparent)]
+pub struct AsyncDetached<'buf, I: AsyncIterator<'buf>> {
     inner: I,
-    phantom_data: PhantomData<&'buf B>,
+    phantom: PhantomData<&'buf ()>,
 }
 
-unsafe impl<'buf, I: AsyncIterator<'buf>, B: MutRB> Send for AsyncDetached<'buf, I, B> {}
+unsafe impl<'buf, I: AsyncIterator<'buf>> Sync for AsyncDetached<'buf, I> {}
+unsafe impl<'buf, I: AsyncIterator<'buf>> Send for AsyncDetached<'buf, I> {}
 
-impl<'buf, B: MutRB<Item = T>, T, I: AsyncIterator<'buf>> AsyncDetached<'buf, I, B> {
+impl<'buf, I: AsyncIterator<'buf>> AsyncDetached<'buf, I> {
     /// Creates [`Self`] from an [`AsyncWorkIter`].
-    pub(crate) fn from_iter(iter: I) -> AsyncDetached<'buf, I, B> {
+    pub(crate) fn from_iter(iter: I) -> AsyncDetached<'buf, I> {
         Self {
             inner: iter,
-            phantom_data: PhantomData,
+            phantom: PhantomData,
         }
+    }
+
+    fn inner_mut(&mut self) -> &mut I {
+        &mut self.inner
     }
 
     /// Same as [`Detached::attach`].
@@ -62,4 +73,31 @@ impl<'buf, B: MutRB<Item = T>, T, I: AsyncIterator<'buf>> AsyncDetached<'buf, I,
             .inner_mut()
             .set_cached_avail(unsafe { avail.unchecked_add(count) });
     }
+
+    delegate!(
+        AsyncIterator (inline),
+        pub fn get_mut<'b>(&'b (mut) self) ->
+        ORBFuture<'buf, 'b, I, (), &'b mut <I::I as ORBIterator>::Item, true>
+    );
+    delegate!(
+        AsyncIterator (inline),
+        pub fn get_mut_slice_exact<'b>(&'b (mut) self, count: usize) ->
+        ORBFuture<'buf,'b, I, usize,
+            <<<I::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'b,>, true
+        >
+    );
+    delegate!(
+        AsyncIterator (inline),
+        pub fn get_mut_slice_avail<'b>(&'b (mut) self) ->
+        ORBFuture<'buf,'b, I, (),
+            <<<I::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'b,>, true
+        >
+    );
+    delegate!(
+        AsyncIterator (inline),
+        pub fn get_mut_slice_multiple_of<'b>(&'b (mut) self, count: usize) ->
+        ORBFuture<'buf,'b, I, usize,
+            <<<I::I as ORBIterator>::Buffer as OneRB>::Storage as StorageComponent>::SliceOutputMut<'b,>, true
+        >
+    );
 }

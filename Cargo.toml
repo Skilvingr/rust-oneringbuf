@@ -1,34 +1,34 @@
 [workspace]
 
 [package]
-name = "mutringbuf"
+name = "oneringbuf"
 version = "0.6.0"
 edition = "2024"
 readme = "README.md"
 authors = ["Skilfingr <skilvingr@gmail.com>"]
 description = "A lock-free single-producer, single-consumer (SPSC) ring buffer with in-place mutability, asynchronous support, and virtual memory optimisation."
-repository = "https://github.com/Skilvingr/rust-mutringbuf"
+repository = "https://github.com/Skilvingr/rust-oneringbuf"
 license = "MIT OR Apache-2.0"
 keywords = ["lock-free", "async", "mmap", "circular", "buffer"]
 categories = ["asynchronous", "concurrency", "data-structures", "no-std", "no-std::no-alloc"]
-documentation = "https://docs.rs/mutringbuf"
+documentation = "https://docs.rs/oneringbuf"
 
 [features]
 default = ["alloc"]
 alloc = [] # Enable support for `alloc` crate
 vmem = ["alloc", "dep:libc"] # Enable support for vmem optimisation
-async = ["dep:futures"] # Enable support for async buffers
+async = ["dep:futures-util"] # Enable support for async buffers
 thread_sanitiser = [] # [DEV ONLY] Avoid false positives when testing with ThreadSanitizer
 
 [dependencies]
 crossbeam-utils = { version = "0.8", default-features = false }
-futures = { version = "0.3", optional = true, default-features = false }
+futures-util = { version = "0.3", optional = true, default-features = false }
 libc = { version = "0.2", optional = true, default-features = false }
 
 [dev-dependencies]
 divan = "0.1.21"
-futures = { version = "0.3" }
 tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+async-scoped = { version = "0.9", features = ["use-tokio"] }
 gungraun = "0.17.0"
 libc = "0.2"
 
@@ -45,21 +45,34 @@ all-features = true
 name = "base"
 path = "benches/divan/base.rs"
 harness = false
+required-features = ["alloc"]
 
 [[bench]]
 name = "parts"
 path = "benches/divan/parts.rs"
 harness = false
+required-features = ["alloc"]
 
 [[bench]]
 name = "slices"
 path = "benches/divan/slices.rs"
+harness = false
+required-features = ["alloc"]
+
+[[bench]]
+name = "stack"
+path = "benches/divan/stack.rs"
 harness = false
 
 [[bench]]
 name = "iai_base"
 path = "benches/iai_benches/iai_base.rs"
 harness = false
+required-features = ["alloc"]
+
+[[example]]
+name = "manage_traits"
+required-features = ["alloc"]
 
 [profile.dev]
 opt-level = 0
