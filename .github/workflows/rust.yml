@@ -1,4 +1,4 @@
-name: Rust + Miri
+name: Rust + Miri + Sanitisers
 
 on: [push, pull_request]
 
