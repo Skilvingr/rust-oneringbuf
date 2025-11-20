@@ -11,11 +11,11 @@
 [tests-badge]: https://github.com/Skilvingr/rust-oneringbuf/actions/workflows/rust.yml/badge.svg
 [tests-url]: https://github.com/Skilvingr/rust-oneringbuf/actions/workflows/rust.yml
 
->_One Ring to rule them all, One ring to find them,\
+>_One Ring to rule them all, One Ring to find them,\
 One Ring to bring them all and in the mem'ry bind them\
 In the Land of Rust where the Data lies._
 
-A lock-free, single-producer, single-consumer (SPSC) ring buffer optimised for real-time applications. It offers in-place mutability, asynchronous support, and virtual memory optimisations.
+A lock-free, single-producer, single-consumer (SPSC) ring buffer optimised for real-time applications. It offers in-place mutability, asynchronous support, and virtual memory optimisation.
 
 ## Key Features
 
@@ -30,7 +30,7 @@ A lock-free, single-producer, single-consumer (SPSC) ring buffer optimised for r
 This crate was specifically developed for real-time audio stream processing, but it is well-suited for any scenario that requires a high-performance SPSC queue, such as:
 
 *   Real-time signal processing
-*   Game development (e.g., for audio or event queues)
+*   Game development (e.g. for audio or event queues)
 *   High-frequency data streaming
 *   Anywhere you need to pass data between two threads with minimal overhead.
 
@@ -42,7 +42,7 @@ Add `oneringbuf` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oneringbuf = "0.1.0" # Replace with the latest version
+oneringbuf = "0.6.0" # Replace with the latest version
 ```
 
 Here is a basic example of creating a buffer, producing, and consuming data:
