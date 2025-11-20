@@ -152,3 +152,11 @@ cargo run --example simple_async --features async
 2.  **Match Buffer Type to Use Case**: Choose the buffer type that best fits your performance and concurrency needs.
 3.  **Buffer Sizing for `vmem`**: When using the `vmem` feature, ensure your buffer size is a multiple of the system's page size to prevent panics.
 4.  **Graceful Shutdown**: The buffer is deallocated only when the last of its iterators is dropped. Ensure all iterators are dropped for proper cleanup.
+
+## License
+
+This work is dual-licensed under:
+ * Apache License, Version 2.0 [LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license [LICENSE-MIT](LICENSE-MIT) or https://opensource.org/license/MIT)
+
+You can choose between one of them.
