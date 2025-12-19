@@ -146,11 +146,40 @@ impl<B: IntoRef + OneRB<Item = T>, T> ConsIter<B> {
 
     /// Tries to pop an element, duplicating it.
     /// # Safety
-    /// This method acts like `ptr::read`: it duplicates the item by making a bitwise copy, ignoring whether it is `Copy`/`Clone` or not.
+    /// This method behaves like `ptr::read`: it duplicates the item by making a bitwise copy, ignoring whether it is `Copy`/`Clone` or not.
     /// So it is your responsibility to ensure that the data may indeed be duplicated.
+    /// Ignoring this requirement might lead to errors, like double-frees.
+    /// E.g. duplicating a `Vec` or other heap-allocated structs copies only their pointer, so, once the copied `Vec`
+    /// gets deallocated, dropping its copy results in a double-free.
+    /// `Self::pop` and `Self::pop_clone` should be preferred over this method.
     #[inline]
-    pub fn pop(&mut self) -> Option<T> {
+    pub unsafe fn pop_unsafe(&mut self) -> Option<T> {
         self.next_duplicate()
+    }
+
+    /// Tries to pop an element, copying it.
+    #[inline]
+    pub fn pop(&mut self) -> Option<T>
+    where
+        T: Copy,
+    {
+        self.next_duplicate()
+    }
+
+    /// Tries to pop an element, cloning it.
+    /// When possible, `Self::pop` should be preferred over this method.
+    #[inline]
+    pub fn pop_clone(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        let ret = self.peek_ref().map(|e| e.clone());
+        if ret.is_some() {
+            unsafe {
+                self.advance(1);
+            }
+        }
+        ret
     }
 
     #[inline]

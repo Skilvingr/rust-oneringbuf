@@ -16,13 +16,13 @@ pub struct LocalCompMut {
 
 impl MutIterComp for LocalCompMut {}
 
-impl Default for LocalCompMut {
-    fn default() -> Self {
+impl LocalCompMut {
+    pub const fn default() -> Self {
         Self {
-            prod_idx: Default::default(),
-            work_idx: Default::default(),
-            cons_idx: Default::default(),
-            alive_iters: 3.into(),
+            prod_idx: UnsafeCell::new(0),
+            work_idx: UnsafeCell::new(0),
+            cons_idx: UnsafeCell::new(0),
+            alive_iters: UnsafeCell::new(3),
         }
     }
 }

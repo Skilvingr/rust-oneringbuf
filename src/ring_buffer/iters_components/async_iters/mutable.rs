@@ -39,6 +39,18 @@ pub struct AsyncCompMut {
 
 impl MutIterComp for AsyncCompMut {}
 
+impl AsyncCompMut {
+    pub const fn default() -> Self {
+        Self {
+            inner: SharedCompMut::default(),
+
+            prod_waker: CachePadded::new(AtomicWaker::new()),
+            work_waker: CachePadded::new(AtomicWaker::new()),
+            cons_waker: CachePadded::new(AtomicWaker::new()),
+        }
+    }
+}
+
 impl AsyncIterComp for AsyncCompMut {
     fn wake_middle_iter(&self) {
         self.work_waker.wake();
@@ -78,18 +90,6 @@ impl AsyncIterComp for AsyncCompMut {
 
     fn wake_cons(&self) {
         self.cons_waker.wake();
-    }
-}
-
-impl Default for AsyncCompMut {
-    fn default() -> Self {
-        Self {
-            inner: SharedCompMut::default(),
-
-            prod_waker: CachePadded::new(AtomicWaker::new()),
-            work_waker: CachePadded::new(AtomicWaker::new()),
-            cons_waker: CachePadded::new(AtomicWaker::new()),
-        }
     }
 }
 

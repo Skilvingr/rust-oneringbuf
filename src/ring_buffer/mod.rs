@@ -79,13 +79,11 @@ impl<S: PStorageComponent, I: IterComponent> OneRB for OneRingBuf<S, I> {
     }
 }
 
-impl<S: PStorageComponent, I: IterComponent + Default> OneRingBuf<S, I> {
-    pub(crate) fn _from(value: S) -> Self {
-        assert!(value.len() > 0);
-
+impl<S: PStorageComponent, I: IterComponent> OneRingBuf<S, I> {
+    pub(crate) const fn _from(value: S, iters: I) -> Self {
         Self {
-            inner: value.into(),
-            iters: I::default(),
+            inner: UnsafeCell::new(value),
+            iters: iters,
         }
     }
 }

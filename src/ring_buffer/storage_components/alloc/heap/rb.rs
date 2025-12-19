@@ -5,6 +5,14 @@ use crate::SharedHeapRB;
 #[allow(unused_imports)]
 use crate::iterators::ProdIter;
 #[cfg(any(feature = "async", doc))]
+use crate::iters_components::AsyncComp;
+#[cfg(any(feature = "async", doc))]
+use crate::iters_components::AsyncCompMut;
+use crate::iters_components::LocalComp;
+use crate::iters_components::LocalCompMut;
+use crate::iters_components::SharedComp;
+use crate::iters_components::SharedCompMut;
+#[cfg(any(feature = "async", doc))]
 use crate::ring_buffer::types::AsyncHeapRBMut;
 use crate::ring_buffer::types::LocalHeapRBMut;
 use crate::ring_buffer::types::SharedHeapRBMut;
@@ -16,7 +24,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 macro_rules! impl_rb {
-    ($t: tt) => {
+    ($t: tt, $i: tt) => {
         impl<T> From<Vec<T>> for $t<T> {
             #[doc = concat!("Converts a `Vec<T>` into a [`", stringify!($t), "`].")]
             /// Note that the length of the buffer will be equal to the length of the vector, and *not*
@@ -26,7 +34,9 @@ macro_rules! impl_rb {
             /// the system's page size, so must be the length of the passed `Vec`.
             /// Please, use [`crate::utils::vmem_helper::get_page_size_mul`] to get a suitable length.
             fn from(value: Vec<T>) -> Self {
-                Self::_from(HeapStorage::from(value))
+                assert!(value.len() > 0);
+
+                Self::_from(HeapStorage::from(value), $i::default())
             }
         }
 
@@ -40,11 +50,14 @@ macro_rules! impl_rb {
             /// This method accepts a minimum size, which will then be used to compute the actual
             /// size (equal to or greater than it).
             pub unsafe fn new_zeroed(capacity: usize) -> Self {
+                assert!(capacity > 0);
+
                 Self::_from(
                     HeapStorage::from(
                         (0..capacity)
                         .map(|_| UnsafeSyncCell::new_zeroed()).collect::<Box<[UnsafeSyncCell<T>]>>()
-                    )
+                    ),
+                    $i::default()
                 )
             }
 
@@ -56,18 +69,19 @@ macro_rules! impl_rb {
             /// size (equal to or greater than it).
             pub fn default(capacity: usize) -> Self
                 where T: Default + Clone {
-                Self::from(vec![T::default(); capacity])
+                    assert!(capacity > 0);
+                    Self::from(vec![T::default(); capacity])
             }
         }
     };
 }
 
 #[cfg(any(feature = "async", doc))]
-impl_rb!(AsyncHeapRB);
+impl_rb!(AsyncHeapRB, AsyncComp);
 #[cfg(any(feature = "async", doc))]
-impl_rb!(AsyncHeapRBMut);
+impl_rb!(AsyncHeapRBMut, AsyncCompMut);
 
-impl_rb!(SharedHeapRB);
-impl_rb!(SharedHeapRBMut);
-impl_rb!(LocalHeapRB);
-impl_rb!(LocalHeapRBMut);
+impl_rb!(SharedHeapRB, SharedComp);
+impl_rb!(SharedHeapRBMut, SharedCompMut);
+impl_rb!(LocalHeapRB, LocalComp);
+impl_rb!(LocalHeapRBMut, LocalCompMut);

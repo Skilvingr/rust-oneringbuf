@@ -127,7 +127,7 @@ To run the tests, benchmarks, or examples, clone the repository and use the foll
 
 To run tests:
 ```shell
-cargo +nightly test
+cargo +nightly test --tests
 ```
 
 To run benchmarks:

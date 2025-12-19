@@ -120,16 +120,66 @@ impl<'buf, B: IntoRef + OneRB<Iters: AsyncIterComp>> AsyncConsIter<B> {
         }
     }
 
-    /// Async version of [`ConsIter::pop`].
+    /// Async version of [`ConsIter::pop_unsafe`].
     /// # Safety
     /// See above.
-    pub fn pop<'b>(&'b mut self) -> ORBFuture<'buf, 'b, Self, (), B::Item, true> {
+    pub unsafe fn pop_unsafe<'b>(&'b mut self) -> ORBFuture<'buf, 'b, Self, (), B::Item, true> {
         #[inline]
         fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
             s: &mut AsyncConsIter<B>,
             _: &mut (),
         ) -> Option<B::Item> {
+            unsafe { s.inner_mut().pop_unsafe() }
+        }
+
+        ORBFuture {
+            iter: self,
+            p: Some(()),
+            f_r: Some(f),
+            f_m: None,
+            phantom: PhantomData,
+        }
+    }
+
+    /// Async version of [`ConsIter::pop`].
+    pub fn pop<'b>(&'b mut self) -> ORBFuture<'buf, 'b, Self, (), B::Item, true>
+    where
+        B::Item: Copy,
+    {
+        #[inline]
+        fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncConsIter<B>,
+            _: &mut (),
+        ) -> Option<B::Item>
+        where
+            B::Item: Copy,
+        {
             s.inner_mut().pop()
+        }
+
+        ORBFuture {
+            iter: self,
+            p: Some(()),
+            f_r: Some(f),
+            f_m: None,
+            phantom: PhantomData,
+        }
+    }
+
+    /// Async version of [`ConsIter::pop_clone`].
+    pub fn pop_clone<'b>(&'b mut self) -> ORBFuture<'buf, 'b, Self, (), B::Item, true>
+    where
+        B::Item: Clone,
+    {
+        #[inline]
+        fn f<B: IntoRef + OneRB<Iters: AsyncIterComp>>(
+            s: &mut AsyncConsIter<B>,
+            _: &mut (),
+        ) -> Option<B::Item>
+        where
+            B::Item: Clone,
+        {
+            s.inner_mut().pop_clone()
         }
 
         ORBFuture {

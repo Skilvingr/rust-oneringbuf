@@ -15,12 +15,12 @@ pub struct LocalComp {
 
 impl NonMutIterComp for LocalComp {}
 
-impl Default for LocalComp {
-    fn default() -> Self {
+impl LocalComp {
+    pub const fn default() -> Self {
         Self {
-            prod_idx: Default::default(),
-            cons_idx: Default::default(),
-            alive_iters: 2.into(),
+            prod_idx: UnsafeCell::new(0),
+            cons_idx: UnsafeCell::new(0),
+            alive_iters: UnsafeCell::new(2),
         }
     }
 }

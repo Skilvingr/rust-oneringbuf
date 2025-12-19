@@ -55,15 +55,15 @@ pub type SharedVmemRBMut<T> = OneRingBuf<VmemStorage<T>, SharedCompMut>;
 
 // Async Stack
 /// Non-mutable stack-allocated asynchronous ring buffer.
-#[cfg(all(feature = "async"))]
+#[cfg(feature = "async")]
 pub type AsyncStackRB<'buf, T, const N: usize> = OneRingBuf<StackStorage<'buf, T, N>, AsyncComp>;
 /// Mutable stack-allocated asynchronous ring buffer.
-#[cfg(all(feature = "async"))]
+#[cfg(feature = "async")]
 pub type AsyncStackRBMut<'buf, T, const N: usize> =
     OneRingBuf<StackStorage<'buf, T, N>, AsyncCompMut>;
-#[cfg(all(feature = "async"))]
+#[cfg(feature = "async")]
 unsafe impl<T, const N: usize> Sync for AsyncStackRB<'_, T, N> {}
-#[cfg(all(feature = "async"))]
+#[cfg(feature = "async")]
 unsafe impl<T, const N: usize> Sync for AsyncStackRBMut<'_, T, N> {}
 
 // Async Heap

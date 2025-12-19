@@ -2,7 +2,7 @@
 
 [package]
 name = "oneringbuf"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 readme = "README.md"
 authors = ["Skilfingr <skilvingr@gmail.com>"]
@@ -72,7 +72,7 @@ required-features = ["alloc"]
 
 [[example]]
 name = "manage_traits"
-required-features = ["alloc"]
+required-features = ["alloc", "async"]
 
 [profile.dev]
 opt-level = 0

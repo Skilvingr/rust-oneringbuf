@@ -19,11 +19,11 @@ pub struct SharedComp {
 
 impl NonMutIterComp for SharedComp {}
 
-impl Default for SharedComp {
-    fn default() -> Self {
+impl SharedComp {
+    pub const fn default() -> Self {
         Self {
-            prod_idx: Default::default(),
-            cons_idx: Default::default(),
+            prod_idx: CachePadded::new(AtomicUsize::new(0)),
+            cons_idx: CachePadded::new(AtomicUsize::new(0)),
             alive_iters: AtomicU8::new(2),
         }
     }

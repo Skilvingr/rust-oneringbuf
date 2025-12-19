@@ -20,12 +20,12 @@ pub struct SharedCompMut {
 
 impl MutIterComp for SharedCompMut {}
 
-impl Default for SharedCompMut {
-    fn default() -> Self {
+impl SharedCompMut {
+    pub const fn default() -> Self {
         Self {
-            prod_idx: Default::default(),
-            work_idx: Default::default(),
-            cons_idx: Default::default(),
+            prod_idx: CachePadded::new(AtomicUsize::new(0)),
+            work_idx: CachePadded::new(AtomicUsize::new(0)),
+            cons_idx: CachePadded::new(AtomicUsize::new(0)),
             alive_iters: AtomicU8::new(3),
         }
     }

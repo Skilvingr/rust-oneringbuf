@@ -14,8 +14,9 @@ pub struct StackStorage<'buf, T, const N: usize> {
     phantom: PhantomData<&'buf ()>,
 }
 
-impl<'buf, T, const N: usize> From<[T; N]> for StackStorage<'buf, T, N> {
-    fn from(value: [T; N]) -> StackStorage<'buf, T, N> {
+impl<'buf, T, const N: usize> StackStorage<'buf, T, N> {
+    /// Creates a `StackStorage` out of an array.
+    pub const fn from_arr(value: [T; N]) -> StackStorage<'buf, T, N> {
         let value = core::mem::ManuallyDrop::new(value);
         let ptr = &value as *const _ as *const [UnsafeSyncCell<T>; N];
 
@@ -176,7 +177,7 @@ pub mod test {
         use crate::storage_components::StackStorage;
         use crate::utils::UnsafeSyncCell;
 
-        let _ = StackStorage::from([0; 100]);
+        let _ = StackStorage::from_arr([0; 100]);
         let _: StackStorage<i32, 100> =
             StackStorage::from(core::array::from_fn(|_| UnsafeSyncCell::new(0)));
     }

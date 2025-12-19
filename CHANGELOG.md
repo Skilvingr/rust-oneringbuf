@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 Dates are written in DD/MM/YYYY order.
 
+<a name="v0.7.0"></a>
+## v0.7.0 (19/12/2025)
+
+### Breaking Changes
+* The old and unsafe `ConsIter`'s method `pop` is now called `pop_unsafe`. Two other methods have been added:
+`pop` and `pop_clone`, which require the type to be stored to implement, respectively, `Copy` and `Clone` traits.
+
+### New Features
+* It is now possible to create stack-allocated buffers in const environments, by using `from_arr_const`.
+
 <a name="v0.6.0"></a>
 ## v0.6.0 (20/11/2025)
 
